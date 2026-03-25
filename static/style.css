@@ -1,0 +1,574 @@
+/* ============================================================
+   Okoone CRM — Custom overrides on top of Pico CSS (dark)
+   ============================================================ */
+
+/* --- Layout ------------------------------------------------ */
+:root {
+  --crm-green: #22c55e;
+  --crm-yellow: #eab308;
+  --crm-red: #ef4444;
+  --crm-blue: #3b82f6;
+  --crm-orange: #f97316;
+  --crm-purple: #a855f7;
+  --crm-emerald: #10b981;
+  --crm-gray: #6b7280;
+}
+
+body {
+  padding-top: 0;
+}
+
+nav {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background: var(--pico-background-color);
+  border-bottom: 1px solid var(--pico-muted-border-color);
+}
+
+nav .brand {
+  font-weight: 700;
+  font-size: 1.15rem;
+  letter-spacing: -0.02em;
+}
+
+main.container {
+  padding-top: 1rem;
+}
+
+/* --- Compact tables ---------------------------------------- */
+table {
+  font-size: 0.875rem;
+}
+
+table td,
+table th {
+  padding: 0.35rem 0.6rem;
+  white-space: nowrap;
+}
+
+table tbody tr {
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+table tbody tr:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+/* --- Score badges ------------------------------------------ */
+.badge-score {
+  display: inline-block;
+  padding: 0.15rem 0.5rem;
+  border-radius: 1rem;
+  font-weight: 600;
+  font-size: 0.8rem;
+  min-width: 2.5rem;
+  text-align: center;
+}
+
+.badge-score.high {
+  background: var(--crm-green);
+  color: #000;
+}
+
+.badge-score.mid {
+  background: var(--crm-yellow);
+  color: #000;
+}
+
+.badge-score.low {
+  background: var(--crm-red);
+  color: #fff;
+}
+
+/* --- Status pills ------------------------------------------ */
+.pill {
+  display: inline-block;
+  padding: 0.15rem 0.55rem;
+  border-radius: 1rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: capitalize;
+}
+
+.pill-discovered  { background: var(--crm-gray);    color: #fff; }
+.pill-screened    { background: var(--crm-blue);    color: #fff; }
+.pill-qualified   { background: var(--crm-green);   color: #000; }
+.pill-contacted   { background: var(--crm-orange);  color: #000; }
+.pill-replied     { background: var(--crm-purple);  color: #fff; }
+.pill-converted   { background: var(--crm-emerald); color: #000; }
+.pill-rejected    { background: var(--crm-red);     color: #fff; }
+
+/* --- Chips (traits & flags) -------------------------------- */
+.chip {
+  display: inline-block;
+  padding: 0.1rem 0.5rem;
+  border-radius: 0.75rem;
+  font-size: 0.72rem;
+  font-weight: 500;
+  margin: 0.1rem;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.chip.trait {
+  background: rgba(59, 130, 246, 0.15);
+  border-color: rgba(59, 130, 246, 0.3);
+  color: #93c5fd;
+}
+
+.chip.flag-positive {
+  background: rgba(34, 197, 94, 0.15);
+  border-color: rgba(34, 197, 94, 0.3);
+  color: #86efac;
+}
+
+.chip.flag-negative {
+  background: rgba(239, 68, 68, 0.15);
+  border-color: rgba(239, 68, 68, 0.3);
+  color: #fca5a5;
+}
+
+.chip.flag-neutral {
+  background: rgba(234, 179, 8, 0.15);
+  border-color: rgba(234, 179, 8, 0.3);
+  color: #fde68a;
+}
+
+/* --- Review buttons ---------------------------------------- */
+.btn-approve {
+  background: var(--crm-green);
+  border-color: var(--crm-green);
+  color: #000;
+}
+
+.btn-reject {
+  background: var(--crm-red);
+  border-color: var(--crm-red);
+  color: #fff;
+}
+
+.btn-flag {
+  background: var(--crm-yellow);
+  border-color: var(--crm-yellow);
+  color: #000;
+}
+
+.btn-approve:hover { filter: brightness(1.15); }
+.btn-reject:hover  { filter: brightness(1.15); }
+.btn-flag:hover    { filter: brightness(1.15); }
+
+/* --- Stats bar --------------------------------------------- */
+.stats-bar {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+}
+
+.stat-card {
+  flex: 1;
+  min-width: 120px;
+  padding: 0.6rem 1rem;
+  border-radius: 0.5rem;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--pico-muted-border-color);
+  text-align: center;
+}
+
+.stat-card .stat-value {
+  font-size: 1.5rem;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.stat-card .stat-label {
+  font-size: 0.75rem;
+  color: var(--pico-muted-color);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* --- Filters bar ------------------------------------------- */
+.filters-bar {
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+}
+
+.filters-bar label {
+  margin-bottom: 0;
+  font-size: 0.75rem;
+}
+
+.filters-bar select,
+.filters-bar input {
+  margin-bottom: 0;
+  padding: 0.35rem 0.5rem;
+  font-size: 0.85rem;
+}
+
+/* --- Score breakdown bar chart ----------------------------- */
+.score-bar-container {
+  margin-bottom: 0.5rem;
+}
+
+.score-bar-label {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.8rem;
+  margin-bottom: 0.15rem;
+}
+
+.score-bar-track {
+  height: 0.5rem;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 0.25rem;
+  overflow: hidden;
+}
+
+.score-bar-fill {
+  height: 100%;
+  border-radius: 0.25rem;
+  transition: width 0.4s ease;
+}
+
+.score-bar-fill.high { background: var(--crm-green); }
+.score-bar-fill.mid  { background: var(--crm-yellow); }
+.score-bar-fill.low  { background: var(--crm-red); }
+
+/* --- Timeline ---------------------------------------------- */
+.timeline {
+  border-left: 2px solid var(--pico-muted-border-color);
+  padding-left: 1rem;
+  margin-left: 0.5rem;
+}
+
+.timeline-item {
+  position: relative;
+  margin-bottom: 1rem;
+}
+
+.timeline-item::before {
+  content: "";
+  position: absolute;
+  left: -1.35rem;
+  top: 0.25rem;
+  width: 0.6rem;
+  height: 0.6rem;
+  border-radius: 50%;
+  background: var(--crm-blue);
+}
+
+.timeline-item .tl-title {
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.timeline-item .tl-company {
+  font-size: 0.85rem;
+  color: var(--pico-muted-color);
+}
+
+.timeline-item .tl-dates {
+  font-size: 0.75rem;
+  color: var(--pico-muted-color);
+}
+
+/* --- Bulk actions bar -------------------------------------- */
+.bulk-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  background: rgba(59, 130, 246, 0.1);
+  border: 1px solid rgba(59, 130, 246, 0.25);
+  border-radius: 0.5rem;
+  margin-bottom: 0.75rem;
+  font-size: 0.85rem;
+}
+
+.bulk-bar select,
+.bulk-bar button {
+  margin-bottom: 0;
+  font-size: 0.8rem;
+  padding: 0.3rem 0.6rem;
+}
+
+/* --- Profile card ------------------------------------------ */
+.profile-header {
+  display: flex;
+  gap: 1.5rem;
+  align-items: flex-start;
+  margin-bottom: 1.5rem;
+}
+
+.profile-photo {
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.profile-info h2 {
+  margin-bottom: 0.25rem;
+}
+
+.profile-info .headline {
+  color: var(--pico-muted-color);
+  margin-bottom: 0.25rem;
+}
+
+/* --- Pagination -------------------------------------------- */
+.pagination {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: center;
+  align-items: center;
+  margin-top: 1rem;
+}
+
+.pagination button {
+  padding: 0.3rem 0.8rem;
+  font-size: 0.85rem;
+  margin-bottom: 0;
+}
+
+.pagination .page-info {
+  font-size: 0.85rem;
+  color: var(--pico-muted-color);
+}
+
+/* --- Scraper status indicator ------------------------------ */
+.scraper-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.75rem;
+}
+
+.scraper-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.scraper-dot.ok      { background: var(--crm-green); }
+.scraper-dot.warning  { background: var(--crm-yellow); }
+.scraper-dot.error    { background: var(--crm-red); }
+.scraper-dot.offline  { background: var(--crm-gray); }
+
+/* --- Eval sliders ------------------------------------------ */
+.weight-slider-group {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+
+.weight-slider-group label {
+  min-width: 120px;
+  font-size: 0.85rem;
+  margin-bottom: 0;
+}
+
+.weight-slider-group input[type="range"] {
+  flex: 1;
+  margin-bottom: 0;
+}
+
+.weight-slider-group .weight-val {
+  min-width: 3rem;
+  text-align: right;
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+
+/* --- Metric cards ------------------------------------------ */
+.metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 1.5rem;
+}
+
+.metric-card {
+  padding: 0.75rem;
+  border-radius: 0.5rem;
+  border: 1px solid var(--pico-muted-border-color);
+  text-align: center;
+}
+
+.metric-card .metric-value {
+  font-size: 1.8rem;
+  font-weight: 700;
+}
+
+.metric-card .metric-label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  color: var(--pico-muted-color);
+  letter-spacing: 0.04em;
+}
+
+/* --- Sparkline bars ---------------------------------------- */
+.sparkline {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 24px;
+}
+
+.sparkline .bar {
+  width: 4px;
+  background: var(--crm-blue);
+  border-radius: 1px;
+  min-height: 2px;
+}
+
+/* --- Misc -------------------------------------------------- */
+.htmx-indicator {
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.htmx-request .htmx-indicator {
+  opacity: 1;
+}
+
+.section-title {
+  font-size: 1rem;
+  font-weight: 600;
+  margin-bottom: 0.75rem;
+  padding-bottom: 0.35rem;
+  border-bottom: 1px solid var(--pico-muted-border-color);
+}
+
+.grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.5rem;
+}
+
+@media (max-width: 768px) {
+  .grid-2 {
+    grid-template-columns: 1fr;
+  }
+}
+
+.side-by-side {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+
+.delta-positive { color: var(--crm-green); }
+.delta-negative { color: var(--crm-red); }
+.delta-neutral  { color: var(--crm-gray); }
+
+/* No-data placeholder */
+.empty-state {
+  text-align: center;
+  padding: 3rem 1rem;
+  color: var(--pico-muted-color);
+}
+
+.empty-state p {
+  font-size: 0.9rem;
+}
+
+/* --- Chat panel ----------------------------------------------- */
+.chat-panel {
+  margin-top: 2rem;
+  border: 1px solid var(--pico-muted-border-color);
+  border-radius: 0.5rem;
+  padding: 1rem;
+}
+
+.chat-messages {
+  max-height: 400px;
+  overflow-y: auto;
+  margin-bottom: 0.75rem;
+  padding: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.chat-msg {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-start;
+}
+
+.chat-msg-user {
+  flex-direction: row-reverse;
+}
+
+.chat-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 0.75rem;
+  flex-shrink: 0;
+}
+
+.chat-msg-assistant .chat-avatar {
+  background: var(--crm-blue);
+  color: #fff;
+}
+
+.chat-msg-user .chat-avatar {
+  background: var(--crm-green);
+  color: #000;
+}
+
+.chat-bubble {
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.75rem;
+  font-size: 0.85rem;
+  line-height: 1.45;
+  max-width: 80%;
+}
+
+.chat-msg-assistant .chat-bubble {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--pico-muted-border-color);
+}
+
+.chat-msg-user .chat-bubble {
+  background: rgba(59, 130, 246, 0.15);
+  border: 1px solid rgba(59, 130, 246, 0.3);
+}
+
+.chat-bubble pre.chat-code {
+  background: rgba(0, 0, 0, 0.3);
+  padding: 0.5rem;
+  border-radius: 0.4rem;
+  font-size: 0.8rem;
+  overflow-x: auto;
+  margin: 0.5rem 0;
+}
+
+.chat-input-form {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.chat-input-form input {
+  flex: 1;
+}
+
+.chat-input-form button {
+  flex-shrink: 0;
+}

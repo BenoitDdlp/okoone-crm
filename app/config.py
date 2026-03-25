@@ -18,6 +18,8 @@ class Settings(BaseSettings):
     LINKEDIN_DAILY_SEARCH_LIMIT: int = 30
     LINKEDIN_DAILY_PROFILE_LIMIT: int = 80
 
+    ANTHROPIC_API_KEY: str = ""
+
     LEARNING_REVIEW_THRESHOLD: int = 20
     SCRAPE_INTERVAL_MINUTES: int = 60
 

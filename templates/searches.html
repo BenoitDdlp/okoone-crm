@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+{% block title %}Recherches — Okoone CRM{% endblock %}
+
+{% block content %}
+<h2 style="font-size:1.25rem;">Recherches LinkedIn</h2>
+
+{# --- Add new search form --- #}
+<details open>
+  <summary>Nouvelle recherche</summary>
+  <form hx-post="/api/v1/searches/" hx-target="#search-list" hx-swap="afterbegin" hx-on::after-request="this.reset()">
+    <div class="grid">
+      <div>
+        <label for="new-keywords">Mots-cles</label>
+        <input type="text" name="keywords" id="new-keywords" required placeholder="CTO, Veterinaire, DevOps...">
+      </div>
+      <div>
+        <label for="new-location">Localisation</label>
+        <input type="text" name="location" id="new-location" placeholder="Paris, France">
+      </div>
+    </div>
+    <div class="grid">
+      <div>
+        <label>
+          <input type="checkbox" name="is_recurring" value="true">
+          Recurrente
+        </label>
+      </div>
+      <div>
+        <label for="new-cron">Cron (si recurrente)</label>
+        <input type="text" name="recurrence_cron" id="new-cron" placeholder="0 8 * * 1">
+      </div>
+    </div>
+    <button type="submit">Creer la recherche</button>
+  </form>
+</details>
+
+{# --- Search list --- #}
+<table>
+  <thead>
+    <tr>
+      <th>Mots-cles</th>
+      <th>Localisation</th>
+      <th>Derniere exec.</th>
+      <th>Resultats</th>
+      <th>Rendement</th>
+      <th>Statut</th>
+      <th>Recurrente</th>
+      <th>Actions</th>
+    </tr>
+  </thead>
+  <tbody id="search-list">
+    {% for s in searches %}
+    <tr id="search-row-{{ s.id }}">
+      <td><strong>{{ s.keywords }}</strong></td>
+      <td>{{ s.location or '—' }}</td>
+      <td>{{ s.last_run_at or 'Jamais' }}</td>
+      <td>{{ s.total_results }}</td>
+      <td>
+        {% if s.total_results > 0 and s.qualified_count is defined %}
+          {{ ((s.qualified_count / s.total_results) * 100)|round(1) }}%
+        {% else %}
+          —
+        {% endif %}
+      </td>
+      <td>
+        {% if s.is_active %}
+          <span class="pill pill-qualified">Active</span>
+        {% else %}
+          <span class="pill pill-discovered">En pause</span>
+        {% endif %}
+      </td>
+      <td>
+        {% if s.is_recurring %}
+          <span style="font-size:0.8rem;">{{ s.recurrence_cron or 'Oui' }}</span>
+        {% else %}
+          Non
+        {% endif %}
+      </td>
+      <td style="white-space:nowrap;">
+        <button class="outline" style="font-size:0.75rem; padding:0.2rem 0.5rem; margin:0;"
+                hx-post="/api/v1/searches/{{ s.id }}/run"
+                hx-target="#search-row-{{ s.id }}"
+                hx-swap="outerHTML">
+          Lancer
+        </button>
+        <button class="outline secondary" style="font-size:0.75rem; padding:0.2rem 0.5rem; margin:0;"
+                hx-patch="/api/v1/searches/{{ s.id }}"
+                hx-vals='{"is_active": {{ "false" if s.is_active else "true" }}}'
+                hx-target="#search-row-{{ s.id }}"
+                hx-swap="outerHTML">
+          {% if s.is_active %}Pause{% else %}Activer{% endif %}
+        </button>
+      </td>
+    </tr>
+    {% else %}
+    <tr><td colspan="8" class="empty-state"><p>Aucune recherche configuree.</p></td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

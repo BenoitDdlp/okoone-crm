@@ -1,0 +1,30 @@
+<div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
+  <button class="btn-approve"
+          hx-post="/api/v1/prospects/{{ prospect.id }}/review"
+          hx-vals='{"verdict":"approve"}'
+          hx-target="#review-section"
+          hx-swap="innerHTML">
+    Approuver
+  </button>
+  <button class="btn-reject"
+          hx-post="/api/v1/prospects/{{ prospect.id }}/review"
+          hx-vals='{"verdict":"reject"}'
+          hx-target="#review-section"
+          hx-swap="innerHTML">
+    Rejeter
+  </button>
+  <button class="btn-flag"
+          hx-post="/api/v1/prospects/{{ prospect.id }}/review"
+          hx-vals='{"verdict":"flag"}'
+          hx-target="#review-section"
+          hx-swap="innerHTML">
+    Signaler
+  </button>
+</div>
+{% if last_review %}
+<p style="margin-top:0.5rem; font-size:0.8rem; color:var(--pico-muted-color);">
+  Dernier avis : <strong>{{ last_review.reviewer_verdict }}</strong>
+  {% if last_review.feedback_text %} — {{ last_review.feedback_text }}{% endif %}
+  <br>le {{ last_review.reviewed_at }}
+</p>
+{% endif %}

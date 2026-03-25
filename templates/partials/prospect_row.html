@@ -1,0 +1,28 @@
+<tr hx-get="/prospects/{{ p.id }}" hx-push-url="true" hx-target="body">
+  <td>
+    <input type="checkbox" name="prospect_ids" value="{{ p.id }}"
+           x-model="selected" @click.stop
+           style="margin:0; vertical-align:middle;">
+  </td>
+  <td><strong>{{ p.full_name or p.linkedin_username }}</strong></td>
+  <td>{{ p.current_title or '—' }}</td>
+  <td>{{ p.current_company or '—' }}</td>
+  <td>{{ p.location or '—' }}</td>
+  <td>
+    {% set score = p.relevance_score|default(0)|round(0)|int %}
+    <span class="badge-score {% if score > 70 %}high{% elif score >= 40 %}mid{% else %}low{% endif %}">
+      {{ score }}
+    </span>
+  </td>
+  <td>
+    <span class="pill pill-{{ p.status|default('discovered') }}">{{ p.status|default('discovered') }}</span>
+  </td>
+  <td>
+    <button class="btn-approve outline" style="padding:0.2rem 0.4rem; font-size:0.7rem; margin:0 0.1rem;"
+            hx-post="/api/v1/prospects/{{ p.id }}/review" hx-vals='{"verdict":"approve"}'
+            hx-target="closest tr" hx-swap="outerHTML" @click.stop>&#10003;</button>
+    <button class="btn-reject outline" style="padding:0.2rem 0.4rem; font-size:0.7rem; margin:0 0.1rem;"
+            hx-post="/api/v1/prospects/{{ p.id }}/review" hx-vals='{"verdict":"reject"}'
+            hx-target="closest tr" hx-swap="outerHTML" @click.stop>&#10005;</button>
+  </td>
+</tr>

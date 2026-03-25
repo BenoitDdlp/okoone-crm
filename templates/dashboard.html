@@ -1,0 +1,167 @@
+{% extends "base.html" %}
+{% block title %}Prospects — Okoone CRM{% endblock %}
+
+{% block content %}
+<div x-data="{ allChecked: false, selectedIds: [] }">
+
+  {# --- Stats bar (htmx partial refresh) --- #}
+  <section id="stats-bar"
+           hx-get="/api/v1/prospects/stats?partial=1"
+           hx-trigger="load"
+           hx-swap="innerHTML">
+    <div class="stats-bar">
+      <div class="stat-card"><div class="stat-value">—</div><div class="stat-label">Chargement...</div></div>
+    </div>
+  </section>
+
+  {# --- Filters --- #}
+  <form class="filters-bar"
+        hx-get="/prospects"
+        hx-target="#prospect-table-body"
+        hx-swap="innerHTML"
+        hx-push-url="true"
+        hx-trigger="change, input delay:300ms from:find(input[name='q'])"
+        hx-indicator="#table-loader">
+
+    <div>
+      <label for="status-filter">Statut</label>
+      <select name="status" id="status-filter">
+        <option value="">Tous</option>
+        <option value="discovered" {% if filters.status == 'discovered' %}selected{% endif %}>Discovered</option>
+        <option value="screened" {% if filters.status == 'screened' %}selected{% endif %}>Screened</option>
+        <option value="qualified" {% if filters.status == 'qualified' %}selected{% endif %}>Qualified</option>
+        <option value="contacted" {% if filters.status == 'contacted' %}selected{% endif %}>Contacted</option>
+        <option value="replied" {% if filters.status == 'replied' %}selected{% endif %}>Replied</option>
+        <option value="converted" {% if filters.status == 'converted' %}selected{% endif %}>Converted</option>
+        <option value="rejected" {% if filters.status == 'rejected' %}selected{% endif %}>Rejected</option>
+      </select>
+    </div>
+
+    <div>
+      <label for="min-score-filter">Score min</label>
+      <input type="range" name="min_score" id="min-score-filter"
+             min="0" max="100" step="5"
+             value="{{ filters.min_score|default(0) }}"
+             style="width:120px;"
+             oninput="this.nextElementSibling.textContent = this.value">
+      <small>{{ filters.min_score|default(0) }}</small>
+    </div>
+
+    <div>
+      <label for="q-filter">Recherche</label>
+      <input type="search" name="q" id="q-filter" placeholder="Nom, entreprise..."
+             value="{{ filters.q|default('') }}">
+    </div>
+
+    <div>
+      <label for="sort-filter">Tri</label>
+      <select name="sort" id="sort-filter">
+        <option value="relevance_score" {% if filters.sort == 'relevance_score' %}selected{% endif %}>Score</option>
+        <option value="created_at" {% if filters.sort == 'created_at' %}selected{% endif %}>Date</option>
+        <option value="full_name" {% if filters.sort == 'full_name' %}selected{% endif %}>Nom</option>
+        <option value="current_company" {% if filters.sort == 'current_company' %}selected{% endif %}>Entreprise</option>
+      </select>
+    </div>
+
+    <div>
+      <label for="order-filter">Ordre</label>
+      <select name="order" id="order-filter">
+        <option value="desc" {% if filters.order == 'desc' %}selected{% endif %}>Desc</option>
+        <option value="asc" {% if filters.order == 'asc' %}selected{% endif %}>Asc</option>
+      </select>
+    </div>
+
+    <input type="hidden" name="page" value="1">
+  </form>
+
+  {# --- Bulk actions --- #}
+  <div class="bulk-bar" x-show="selectedIds.length > 0" x-cloak>
+    <span x-text="selectedIds.length + ' selectionne(s)'"></span>
+    <select x-ref="bulkStatus">
+      <option value="">Changer statut...</option>
+      <option value="qualified">Qualified</option>
+      <option value="contacted">Contacted</option>
+      <option value="rejected">Rejected</option>
+    </select>
+    <button class="outline"
+            @click="
+              if($refs.bulkStatus.value) {
+                fetch('/api/v1/prospects/bulk-status', {
+                  method: 'POST',
+                  headers: {'Content-Type':'application/json'},
+                  body: JSON.stringify({ids: selectedIds, status: $refs.bulkStatus.value})
+                }).then(() => htmx.trigger('#prospect-table-body', 'htmx:load'))
+              }
+            ">Appliquer</button>
+    <select x-ref="bulkCampaign">
+      <option value="">Inscrire campagne...</option>
+      {% for c in campaigns|default([]) %}
+      <option value="{{ c.id }}">{{ c.name }}</option>
+      {% endfor %}
+    </select>
+    <button class="outline"
+            @click="
+              if($refs.bulkCampaign.value) {
+                selectedIds.forEach(pid => {
+                  fetch('/api/v1/campaigns/' + $refs.bulkCampaign.value + '/enroll/' + pid, {method:'POST'})
+                });
+              }
+            ">Inscrire</button>
+  </div>
+
+  {# --- Prospects table --- #}
+  <div style="overflow-x:auto;">
+    <span class="htmx-indicator" id="table-loader" aria-busy="true">Chargement...</span>
+    <table>
+      <thead>
+        <tr>
+          <th style="width:2rem;">
+            <input type="checkbox" style="margin:0;"
+                   @change="allChecked = $event.target.checked; selectedIds = allChecked ? [...document.querySelectorAll('input[name=prospect_ids]')].map(e=>parseInt(e.value)) : []">
+          </th>
+          <th>Nom</th>
+          <th>Poste</th>
+          <th>Entreprise</th>
+          <th>Localisation</th>
+          <th>Score</th>
+          <th>Statut</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody id="prospect-table-body">
+        {% for p in prospects %}
+          {% include "partials/prospect_row.html" %}
+        {% else %}
+          <tr><td colspan="8" class="empty-state"><p>Aucun prospect trouve.</p></td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  {# --- Pagination --- #}
+  <div class="pagination">
+    {% if page > 1 %}
+    <button class="outline"
+            hx-get="/prospects?page={{ page - 1 }}&status={{ filters.status|default('') }}&min_score={{ filters.min_score|default('') }}&q={{ filters.q|default('') }}&sort={{ filters.sort|default('relevance_score') }}&order={{ filters.order|default('desc') }}"
+            hx-target="#prospect-table-body"
+            hx-swap="innerHTML"
+            hx-push-url="true">
+      &laquo; Precedent
+    </button>
+    {% endif %}
+
+    <span class="page-info">Page {{ page }} / {{ total_pages }}</span>
+
+    {% if page < total_pages %}
+    <button class="outline"
+            hx-get="/prospects?page={{ page + 1 }}&status={{ filters.status|default('') }}&min_score={{ filters.min_score|default('') }}&q={{ filters.q|default('') }}&sort={{ filters.sort|default('relevance_score') }}&order={{ filters.order|default('desc') }}"
+            hx-target="#prospect-table-body"
+            hx-swap="innerHTML"
+            hx-push-url="true">
+      Suivant &raquo;
+    </button>
+    {% endif %}
+  </div>
+
+</div>
+{% endblock %}

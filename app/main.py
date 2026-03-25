@@ -53,7 +53,7 @@ app.add_middleware(APIKeyMiddleware)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
-from app.routers import dashboard, prospects, searches, campaigns, scraper, eval as eval_router
+from app.routers import dashboard, prospects, searches, campaigns, scraper, eval as eval_router, chat
 
 app.include_router(dashboard.router)
 app.include_router(prospects.router)
@@ -61,6 +61,7 @@ app.include_router(searches.router)
 app.include_router(campaigns.router)
 app.include_router(scraper.router)
 app.include_router(eval_router.router)
+app.include_router(chat.router)
 
 
 @app.get("/health")

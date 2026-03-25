@@ -1,3 +1,180 @@
-from fastapi import APIRouter
+from __future__ import annotations
 
-router = APIRouter(prefix="/api/prospects", tags=["prospects"])
+import json
+import math
+from datetime import datetime, timezone
+from typing import Optional
+
+from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import HTMLResponse
+from fastapi.templating import Jinja2Templates
+
+from app.database import get_db
+from app.models import HumanReviewCreate, ProspectUpdate
+from app.repositories.prospect_repo import ProspectRepository
+
+router = APIRouter(prefix="/api/v1/prospects", tags=["prospects"])
+templates = Jinja2Templates(directory="templates")
+
+PAGE_SIZE = 50
+
+
+@router.get("/")
+async def list_prospects(
+    status: Optional[str] = None,
+    min_score: Optional[float] = None,
+    sort: str = "relevance_score",
+    order: str = "desc",
+    q: Optional[str] = None,
+    page: int = 1,
+    limit: int = PAGE_SIZE,
+):
+    """List prospects with filters, sort, search, and pagination."""
+    async with get_db() as db:
+        repo = ProspectRepository(db)
+
+        if q and q.strip():
+            prospects = await repo.search_fulltext(q.strip(), limit=limit)
+            total = len(prospects)
+        else:
+            offset = (page - 1) * limit
+            prospects, total = await repo.list_all(
+                status=status,
+                min_score=min_score,
+                sort_by=sort,
+                order=order,
+                limit=limit,
+                offset=offset,
+            )
+
+    return {
+        "prospects": prospects,
+        "total": total,
+        "page": page,
+        "total_pages": max(1, math.ceil(total / limit)),
+    }
+
+
+@router.get("/stats")
+async def get_stats(request: Request, partial: Optional[str] = None):
+    """Prospect counts by status. If partial=1, return HTML partial."""
+    async with get_db() as db:
+        repo = ProspectRepository(db)
+        by_status = await repo.count_by_status()
+        total = sum(by_status.values())
+
+    if partial == "1":
+        return HTMLResponse(
+            templates.get_template("partials/stats_bar.html").render(
+                {"request": request, "total": total, "by_status": by_status}
+            )
+        )
+
+    return {"total": total, "by_status": by_status}
+
+
+@router.get("/{prospect_id}")
+async def get_prospect(prospect_id: int):
+    """Get a single prospect by ID."""
+    async with get_db() as db:
+        repo = ProspectRepository(db)
+        prospect = await repo.find_by_id(prospect_id)
+        if not prospect:
+            raise HTTPException(status_code=404, detail="Prospect introuvable")
+    return prospect
+
+
+@router.patch("/{prospect_id}")
+async def update_prospect(prospect_id: int, data: ProspectUpdate):
+    """Update prospect fields."""
+    async with get_db() as db:
+        repo = ProspectRepository(db)
+        existing = await repo.find_by_id(prospect_id)
+        if not existing:
+            raise HTTPException(status_code=404, detail="Prospect introuvable")
+
+        update_data = data.model_dump(exclude_unset=True)
+        if not update_data:
+            return existing
+
+        await repo.update(prospect_id, update_data)
+        updated = await repo.find_by_id(prospect_id)
+    return updated
+
+
+@router.post("/{prospect_id}/review")
+async def review_prospect(
+    request: Request,
+    prospect_id: int,
+):
+    """Submit a human review (approve/reject/flag). Returns updated row partial for htmx."""
+    # Accept both JSON and form data
+    content_type = request.headers.get("content-type", "")
+    if "application/json" in content_type:
+        body = await request.json()
+    else:
+        form = await request.form()
+        body = dict(form)
+
+    verdict = body.get("verdict", "flag")
+    feedback_text = body.get("feedback_text")
+    relevance_override = body.get("relevance_override")
+
+    if verdict not in ("approve", "reject", "flag"):
+        raise HTTPException(status_code=400, detail="Verdict invalide")
+
+    async with get_db() as db:
+        repo = ProspectRepository(db)
+        prospect = await repo.find_by_id(prospect_id)
+        if not prospect:
+            raise HTTPException(status_code=404, detail="Prospect introuvable")
+
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        await db.execute(
+            """
+            INSERT INTO human_reviews (prospect_id, reviewer_verdict, relevance_override, feedback_text, reviewed_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (prospect_id, verdict, relevance_override, feedback_text, now),
+        )
+
+        # Update prospect status based on verdict
+        status_map = {"approve": "qualified", "reject": "rejected", "flag": prospect["status"]}
+        new_status = status_map[verdict]
+        update_fields: dict = {"status": new_status}
+        if relevance_override is not None:
+            update_fields["relevance_score"] = float(relevance_override)
+
+        await repo.update(prospect_id, update_fields)
+        await db.commit()
+
+        updated = await repo.find_by_id(prospect_id)
+
+    # Return partial row for htmx swap
+    is_htmx = request.headers.get("HX-Request") == "true"
+    if is_htmx:
+        return HTMLResponse(
+            templates.get_template("partials/prospect_row.html").render(
+                {"request": request, "p": updated}
+            )
+        )
+
+    return updated
+
+
+@router.post("/bulk-status")
+async def bulk_status(request: Request):
+    """Bulk update status for multiple prospects."""
+    body = await request.json()
+    ids = body.get("ids", [])
+    new_status = body.get("status")
+
+    if not ids or not new_status:
+        raise HTTPException(status_code=400, detail="ids et status requis")
+
+    async with get_db() as db:
+        repo = ProspectRepository(db)
+        for pid in ids:
+            await repo.update(int(pid), {"status": new_status})
+
+    return {"updated": len(ids), "status": new_status}

@@ -1,0 +1,14 @@
+<div class="stats-bar">
+  <div class="stat-card">
+    <div class="stat-value">{{ total }}</div>
+    <div class="stat-label">Total</div>
+  </div>
+  {% for status_name, count in by_status.items() %}
+  <div class="stat-card">
+    <div class="stat-value">{{ count }}</div>
+    <div class="stat-label">
+      <span class="pill pill-{{ status_name }}">{{ status_name }}</span>
+    </div>
+  </div>
+  {% endfor %}
+</div>

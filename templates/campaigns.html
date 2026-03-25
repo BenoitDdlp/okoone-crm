@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}Campagnes — Okoone CRM{% endblock %}
+
+{% block content %}
+<h2 style="font-size:1.25rem;">Campagnes email</h2>
+
+{# --- Create new campaign --- #}
+<details open>
+  <summary>Nouvelle campagne</summary>
+  <form hx-post="/api/v1/campaigns/" hx-target="#campaign-list" hx-swap="afterbegin" hx-on::after-request="this.reset()">
+    <div class="grid">
+      <div>
+        <label for="camp-name">Nom</label>
+        <input type="text" name="name" id="camp-name" required placeholder="Campagne CTO France Q1">
+      </div>
+      <div>
+        <label for="camp-min-score">Score minimum</label>
+        <input type="number" name="min_relevance_score" id="camp-min-score" value="50" min="0" max="100" step="5">
+      </div>
+    </div>
+    <button type="submit">Creer la campagne</button>
+  </form>
+</details>
+
+{# --- Campaign list --- #}
+<table>
+  <thead>
+    <tr>
+      <th>Nom</th>
+      <th>Statut</th>
+      <th>Inscrits</th>
+      <th>Envoyes</th>
+      <th>Taux reponse</th>
+      <th>Actions</th>
+    </tr>
+  </thead>
+  <tbody id="campaign-list">
+    {% for c in campaigns %}
+    <tr>
+      <td>
+        <a href="/campaigns/{{ c.id }}" style="font-weight:600;">{{ c.name }}</a>
+      </td>
+      <td>
+        <span class="pill pill-{% if c.status == 'active' %}qualified{% elif c.status == 'paused' %}discovered{% elif c.status == 'completed' %}converted{% else %}screened{% endif %}">
+          {{ c.status }}
+        </span>
+      </td>
+      <td>{{ c.enrolled_count|default(0) }}</td>
+      <td>{{ c.sent_count|default(0) }}</td>
+      <td>
+        {% if c.sent_count|default(0) > 0 and c.reply_count is defined %}
+          {{ ((c.reply_count / c.sent_count) * 100)|round(1) }}%
+        {% else %}
+          —
+        {% endif %}
+      </td>
+      <td>
+        <button class="outline" style="font-size:0.75rem; padding:0.2rem 0.5rem; margin:0;"
+                hx-post="/api/v1/campaigns/process-sends"
+                hx-swap="none">
+          Traiter envois
+        </button>
+      </td>
+    </tr>
+    {% else %}
+    <tr><td colspan="6" class="empty-state"><p>Aucune campagne creee.</p></td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}
