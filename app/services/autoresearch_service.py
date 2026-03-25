@@ -16,18 +16,12 @@ Claude is the "researcher" that executes and proposes improvements.
 import json
 from datetime import datetime
 
-import anthropic
-
 from app.config import settings
-
-MODEL = "claude-sonnet-4-20250514"
+from app.services.claude_advisor import _call_claude
 
 
 class AutoresearchService:
     """Orchestrates the prospect research loop."""
-
-    def __init__(self) -> None:
-        self._client = anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
 
     async def _load_program(self, db) -> tuple[int, str]:
         """Load active program. Returns (version, content)."""
@@ -107,13 +101,7 @@ Pour chaque requete, donne:
 Reponds en JSON array uniquement, pas de texte avant/apres:
 [{{"keywords": "...", "location": "...", "reasoning": "..."}}]"""
 
-        response = await self._client.messages.create(
-            model=MODEL,
-            max_tokens=2048,
-            messages=[{"role": "user", "content": prompt}],
-        )
-
-        text = response.content[0].text.strip()
+        text = (await _call_claude(prompt, system="")).strip()
         # Extract JSON from response
         if text.startswith("["):
             return json.loads(text)
@@ -171,13 +159,7 @@ Pour chaque prospect, evalue sa pertinence par rapport au programme.
 Reponds en JSON array:
 [{{"prospect_id": ID, "score": 0-100, "verdict": "qualified|maybe|reject", "reasoning": "1 phrase"}}]"""
 
-        response = await self._client.messages.create(
-            model=MODEL,
-            max_tokens=4096,
-            messages=[{"role": "user", "content": prompt}],
-        )
-
-        text = response.content[0].text.strip()
+        text = (await _call_claude(prompt, system="")).strip()
         import re
         match = re.search(r"\[.*\]", text, re.DOTALL)
         if match:
@@ -241,13 +223,7 @@ Reponds avec:
 ### Metriques attendues
 [ce que tu predis comme amelioration]"""
 
-        response = await self._client.messages.create(
-            model=MODEL,
-            max_tokens=4096,
-            messages=[{"role": "user", "content": prompt}],
-        )
-
-        text = response.content[0].text
+        text = await _call_claude(prompt, system="")
 
         # Extract proposed program from code block
         import re

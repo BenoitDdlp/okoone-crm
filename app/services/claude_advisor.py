@@ -1,19 +1,19 @@
 """Claude-powered self-improving advisor for prospect screening.
 
-Orchestrates the learning loop: analyzes human reviews, proposes scoring
-weight adjustments, generates new search queries, and answers user questions
-about the prospect pipeline — all through the Anthropic API.
+Orchestrates the learning loop via the Claude CLI (`claude -p`).
+Uses the CLI instead of the Python SDK because the VPS authenticates
+with an OAuth token (sk-ant-oat01-*) managed by the Claude CLI.
 """
 
+import asyncio
 import json
+import shutil
 from datetime import datetime
-
-import anthropic
 
 from app.config import settings
 
-MODEL = "claude-sonnet-4-20250514"
-MAX_TOKENS = 4096
+CLAUDE_CLI = settings.CLAUDE_CLI_PATH or shutil.which("claude") or "claude"
+MODEL = settings.CLAUDE_MODEL or "claude-sonnet-4-20250514"
 
 SYSTEM_PROMPT = """Tu es l'assistant IA du CRM de prospection Okoone. Tu aides a ameliorer le screening
 de prospects LinkedIn pour une agence digitale basee en Asie du Sud-Est.
@@ -35,11 +35,23 @@ Quand tu proposes des changements de poids, utilise le format JSON: {"weight_nam
 Quand tu proposes des queries, utilise le format: {"keywords": "...", "location": "..."}"""
 
 
-class ClaudeAdvisor:
-    """Orchestrates self-improving loop via Claude API."""
+async def _call_claude(prompt: str, system: str = SYSTEM_PROMPT) -> str:
+    """Call Claude via CLI. Uses create_subprocess_exec (no shell injection)."""
+    full_prompt = f"{system}\n\n---\n\n{prompt}" if system else prompt
+    proc = await asyncio.create_subprocess_exec(
+        CLAUDE_CLI, "-p", full_prompt, "--model", MODEL,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=120)
+    if proc.returncode != 0:
+        error_msg = stderr.decode().strip()[:200] if stderr else "Unknown error"
+        raise RuntimeError(f"Claude CLI error: {error_msg}")
+    return stdout.decode().strip()
 
-    def __init__(self) -> None:
-        self._client = anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
+
+class ClaudeAdvisor:
+    """Orchestrates self-improving loop via Claude CLI."""
 
     async def _build_context(self, db) -> str:
         """Build a context summary from current CRM state for Claude."""
@@ -145,14 +157,8 @@ class ClaudeAdvisor:
             "content": f"## Contexte CRM (auto-genere)\n{context}\n\n---\n\n## Ma question\n{user_message}",
         })
 
-        response = await self._client.messages.create(
-            model=MODEL,
-            max_tokens=MAX_TOKENS,
-            system=SYSTEM_PROMPT,
-            messages=messages,
-        )
-
-        return response.content[0].text
+        prompt = f"## Contexte CRM (auto-genere)\n{context}\n\n---\n\n## Ma question\n{user_message}"
+        return await _call_claude(prompt)
 
     async def analyze_and_propose(self, db) -> dict:
         """Run a full analysis cycle: ask Claude to review current state and propose improvements.
@@ -180,14 +186,7 @@ class ClaudeAdvisor:
             "### Nouveaux traits\n### Verdict"
         )
 
-        response = await self._client.messages.create(
-            model=MODEL,
-            max_tokens=MAX_TOKENS,
-            system=SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": prompt}],
-        )
-
-        text = response.content[0].text
+        text = await _call_claude(prompt)
 
         # Try to extract structured data from the response
         result: dict = {"analysis": text, "proposed_weights": None, "proposed_queries": None, "proposed_traits": None}
@@ -232,11 +231,4 @@ class ClaudeAdvisor:
             "3. Un message court (3-4 phrases max)"
         )
 
-        response = await self._client.messages.create(
-            model=MODEL,
-            max_tokens=1024,
-            system=SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": prompt}],
-        )
-
-        return response.content[0].text
+        return await _call_claude(prompt)

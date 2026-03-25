@@ -21,6 +21,8 @@ class Settings(BaseSettings):
     LINKEDIN_DAILY_PROFILE_LIMIT: int = 80
 
     ANTHROPIC_API_KEY: str = ""
+    CLAUDE_CLI_PATH: str = ""
+    CLAUDE_MODEL: str = "claude-sonnet-4-20250514"
 
     LEARNING_REVIEW_THRESHOLD: int = 20
     SCRAPE_INTERVAL_MINUTES: int = 60
