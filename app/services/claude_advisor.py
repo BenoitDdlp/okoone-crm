@@ -35,6 +35,18 @@ Quand tu proposes des changements de poids, utilise le format JSON: {"weight_nam
 Quand tu proposes des queries, utilise le format: {"keywords": "...", "location": "..."}"""
 
 
+def _claude_env() -> dict[str, str]:
+    """Build a clean env for the Claude CLI subprocess."""
+    import os
+    home = os.environ.get("HOME", "/home/openclaw")
+    return {
+        "HOME": home,
+        "PATH": f"{home}/.npm-global/bin:{home}/.local/bin:/usr/local/bin:/usr/bin:/bin",
+        "NODE_PATH": f"{home}/.npm-global/lib/node_modules",
+        "ANTHROPIC_API_KEY": os.environ.get("ANTHROPIC_API_KEY", ""),
+    }
+
+
 async def _call_claude(prompt: str, system: str = SYSTEM_PROMPT) -> str:
     """Call Claude via CLI. Uses create_subprocess_exec (no shell injection)."""
     full_prompt = f"{system}\n\n---\n\n{prompt}" if system else prompt
@@ -42,10 +54,11 @@ async def _call_claude(prompt: str, system: str = SYSTEM_PROMPT) -> str:
         CLAUDE_CLI, "-p", full_prompt, "--model", MODEL,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
+        env=_claude_env(),
     )
     stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=120)
     if proc.returncode != 0:
-        error_msg = stderr.decode().strip()[:200] if stderr else "Unknown error"
+        error_msg = stderr.decode().strip()[:200] if stderr else f"exit code {proc.returncode}"
         raise RuntimeError(f"Claude CLI error: {error_msg}")
     return stdout.decode().strip()
 
