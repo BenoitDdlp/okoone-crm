@@ -120,26 +120,27 @@ class SessionManager:
     async def restore_cookies(self, scraper: LinkedInScraper) -> bool:
         """Load encrypted cookies from DB and inject into browser context.
 
+        Picks the most recent active session regardless of name.
         Returns ``True`` if cookies were successfully restored.
         """
         async with aiosqlite.connect(self._db_path) as db:
             db.row_factory = aiosqlite.Row
             row = await db.execute_fetchall(
                 """
-                SELECT cookies_json FROM linkedin_sessions
-                 WHERE session_name = ? AND is_active = 1
-                 ORDER BY last_used_at DESC LIMIT 1
+                SELECT cookies_json, session_name FROM linkedin_sessions
+                 WHERE is_active = 1
+                 ORDER BY last_used_at DESC, created_at DESC LIMIT 1
                 """,
-                (self._session_name,),
             )
 
         if not row:
-            logger.info("No stored session found for '%s'", self._session_name)
+            logger.info("No active LinkedIn session found in DB")
             return False
 
         encrypted: str = row[0]["cookies_json"]
+        found_name: str = row[0]["session_name"]
         if not encrypted:
-            logger.info("Session '%s' has empty cookie data", self._session_name)
+            logger.info("Session '%s' has empty cookie data", found_name)
             return False
 
         try:

@@ -232,11 +232,12 @@ async def trigger_research_run():
             rate_limiter=rate_limiter,
         )
 
-        # Restore cookies from DB
+        # Restore cookies from DB — use wildcard session name to find ANY active session
         session_mgr = SessionManager(
             db_path=settings.DATABASE_URL.replace("sqlite:///", ""),
             fernet_key=settings.FERNET_KEY,
             profile_dir="/tmp/okoone-linkedin-profile",
+            session_name="*",  # will be overridden below
         )
 
         total_found = 0
