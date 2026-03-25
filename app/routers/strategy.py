@@ -211,38 +211,160 @@ async def delete_acquaintance(acq_id: int):
 
 @router.post("/api/v1/strategy/run", response_class=HTMLResponse)
 async def trigger_research_run():
-    """Trigger a full autoresearch cycle. This is the main loop entry point."""
-    # Import here to avoid circular deps
-    from app.services.scraper_service import ScraperService
+    """Manual run: Claude generates queries + LinkedIn scraper executes them."""
     from app.scraper.linkedin import LinkedInScraper
     from app.scraper.rate_limiter import RateLimiter
-    from app.services.prospect_service import ProspectService
+    from app.scraper.session_manager import SessionManager
+    from app.scraper.parser import parse_search_results
     from app.services.scoring_service import ScoringService
     from app.repositories.prospect_repo import ProspectRepository
-    from app.repositories.search_repo import SearchRepository
 
     async with get_db() as db:
-        rate_limiter = RateLimiter()
+        # Step 1: Claude generates search queries from program
+        queries = await research.generate_search_plan(db)
+        if not queries:
+            return _toast_html("Claude n'a genere aucune query.", "error")
+
+        # Step 2: Init scraper with LinkedIn cookies
+        rate_limiter = RateLimiter(account_created_date="2026-03-25")
         scraper = LinkedInScraper(
-            profile_dir="/home/openclaw/.linkedin-mcp/profile",
+            profile_dir="/tmp/okoone-linkedin-profile",
             rate_limiter=rate_limiter,
         )
-        prospect_repo = ProspectRepository(db)
-        search_repo = SearchRepository(db)
-        scoring = ScoringService()
-        prospect_service = ProspectService(prospect_repo, scoring)
-        scraper_service = ScraperService(scraper, prospect_service, search_repo, rate_limiter)
+
+        # Restore cookies from DB
+        session_mgr = SessionManager(
+            db_path=settings.DATABASE_URL.replace("sqlite:///", ""),
+            fernet_key=settings.FERNET_KEY,
+            profile_dir="/tmp/okoone-linkedin-profile",
+        )
+
+        total_found = 0
+        total_new = 0
+        errors: list[str] = []
 
         try:
-            result = await research.run_full_cycle(db, scraper_service)
-            return f"""<div style="padding:0.75rem;border:1px solid var(--crm-green);border-radius:0.5rem;font-size:0.85rem;">
-                Cycle termine : {result.get('queries_generated', 0)} queries, {result.get('prospects_found', 0)} prospects trouves.
-                <br>Rechargez la page pour voir les resultats.
-            </div>"""
+            await scraper.start()
+            await session_mgr.restore_cookies(scraper)
+
+            # Check session
+            if not await scraper.is_session_valid():
+                await scraper.stop()
+                return _toast_html(
+                    "Session LinkedIn expiree. Re-authentifie le compte (uvx linkedin-scraper-mcp --login).",
+                    "error",
+                )
+
+            repo = ProspectRepository(db)
+            scoring = ScoringService()
+
+            # Step 3: Execute each query (respect rate limits)
+            for i, q in enumerate(queries):
+                try:
+                    results = await scraper.search_people(
+                        q["keywords"], q.get("location")
+                    )
+                    total_found += len(results)
+
+                    # Save query to DB
+                    cursor = await db.execute(
+                        "INSERT INTO search_queries (keywords, location) VALUES (?, ?)",
+                        (q["keywords"], q.get("location")),
+                    )
+                    await db.commit()
+
+                    # Upsert each prospect
+                    for p in results:
+                        username = p.get("profile_username", "")
+                        if not username:
+                            continue
+
+                        _, is_new = await repo.upsert_by_username(username, {
+                            "full_name": p.get("full_name", ""),
+                            "headline": p.get("headline", ""),
+                            "location": p.get("location", ""),
+                            "linkedin_url": f"https://www.linkedin.com/in/{username}/",
+                            "linkedin_username": username,
+                            "source_search_id": cursor.lastrowid,
+                            "scraped_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        })
+                        if is_new:
+                            total_new += 1
+
+                    await db.commit()
+
+                except Exception as e:
+                    errors.append(f"Query '{q['keywords'][:30]}': {str(e)[:80]}")
+                    if "DailyLimitReached" in str(e):
+                        break
+
+            # Step 4: Score all new prospects
+            scored = 0
+            cursor = await db.execute(
+                "SELECT id FROM prospects WHERE relevance_score = 0 OR relevance_score IS NULL"
+            )
+            unscored = [row[0] for row in await cursor.fetchall()]
+            weights_cursor = await db.execute(
+                "SELECT criteria_json FROM scoring_weights WHERE is_active = 1 LIMIT 1"
+            )
+            weights_row = await weights_cursor.fetchone()
+            if weights_row and unscored:
+                import json as _json
+                weights = _json.loads(weights_row[0])
+                for pid in unscored:
+                    prospect = await repo.find_by_id(pid)
+                    if prospect:
+                        score, breakdown = await scoring.score_prospect(prospect, weights)
+                        await repo.update(pid, {
+                            "relevance_score": score,
+                            "score_breakdown": _json.dumps(breakdown),
+                            "status": "screened",
+                        })
+                        scored += 1
+                await db.commit()
+
+            # Step 5: Record run
+            version_cursor = await db.execute(
+                "SELECT version FROM prospect_program WHERE status = 'active' ORDER BY version DESC LIMIT 1"
+            )
+            v = await version_cursor.fetchone()
+            await db.execute("""
+                INSERT INTO research_runs
+                    (program_version, finished_at, status, prospects_found, prospects_qualified)
+                VALUES (?, datetime('now'), 'completed', ?, ?)
+            """, (v[0] if v else 0, total_new, scored))
+            await db.commit()
+
         except Exception as e:
-            return f"""<div style="padding:0.75rem;border:1px solid var(--crm-red);border-radius:0.5rem;font-size:0.85rem;">
-                Erreur: {str(e)[:200]}
-            </div>"""
+            errors.append(str(e)[:200])
+        finally:
+            await scraper.stop()
+
+        stats = rate_limiter.get_stats()
+        error_html = f"<br>Erreurs: {'; '.join(errors[:3])}" if errors else ""
+
+        return f"""<div style="padding:1rem;border:1px solid var(--success);border-radius:var(--radius-sm);font-size:0.88rem;background:var(--success-dim);">
+            <strong>Cycle termine</strong><br>
+            {len(queries)} queries executees |
+            {total_found} resultats trouves |
+            {total_new} nouveaux prospects |
+            {scored} scores<br>
+            <span style="color:var(--muted);font-size:0.8rem;">
+                Rate limits: {stats['search']['used']}/{stats['search']['limit']} recherches,
+                {stats['profile']['used']}/{stats['profile']['limit']} profils
+                (compte age {stats['account_age_weeks']} sem.)
+            </span>
+            {error_html}
+        </div>"""
+
+
+def _toast_html(msg: str, kind: str = "info") -> HTMLResponse:
+    color = {"error": "var(--error)", "success": "var(--success)"}.get(kind, "var(--info)")
+    bg = {"error": "var(--error-dim)", "success": "var(--success-dim)"}.get(kind, "var(--info-dim)")
+    return HTMLResponse(
+        f'<div style="padding:0.75rem;border:1px solid {color};border-radius:var(--radius-sm);'
+        f'font-size:0.88rem;background:{bg};">{msg}</div>'
+    )
 
 
 @router.post("/api/v1/strategy/accept-proposal/{run_id}")

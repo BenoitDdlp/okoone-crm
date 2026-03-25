@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     ANTHROPIC_API_KEY: str = ""
     CLAUDE_CLI_PATH: str = ""
     CLAUDE_MODEL: str = "claude-sonnet-4-20250514"
+    LINKEDIN_ACCOUNT_CREATED: str = "2026-03-25"
 
     LEARNING_REVIEW_THRESHOLD: int = 20
     SCRAPE_INTERVAL_MINUTES: int = 60
