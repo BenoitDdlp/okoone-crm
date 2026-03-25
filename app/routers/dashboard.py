@@ -84,9 +84,9 @@ async def prospect_list(
         return HTMLResponse("".join(html_parts))
 
     return templates.TemplateResponse(
+        request,
         "dashboard.html",
         {
-            "request": request,
             "prospects": prospects,
             "page": page,
             "total_pages": total_pages,
@@ -163,9 +163,9 @@ async def prospect_detail(request: Request, prospect_id: int):
         enrollments = [dict(r) for r in await enroll_cursor.fetchall()]
 
     return templates.TemplateResponse(
+        request,
         "prospect_detail.html",
         {
-            "request": request,
             "prospect": prospect,
             "score_breakdown": score_breakdown,
             "experiences": experiences,
@@ -190,9 +190,9 @@ async def searches_page(request: Request):
         searches = [dict(r) for r in await cursor.fetchall()]
 
     return templates.TemplateResponse(
+        request,
         "searches.html",
         {
-            "request": request,
             "searches": searches,
             "active_nav": "searches",
         },
@@ -220,9 +220,9 @@ async def campaigns_page(request: Request):
         campaigns = [dict(r) for r in await cursor.fetchall()]
 
     return templates.TemplateResponse(
+        request,
         "campaigns.html",
         {
-            "request": request,
             "campaigns": campaigns,
             "active_nav": "campaigns",
         },
@@ -273,9 +273,9 @@ async def eval_dashboard(request: Request):
         signals = [dict(r) for r in await sig_cursor.fetchall()]
 
     return templates.TemplateResponse(
+        request,
         "eval.html",
         {
-            "request": request,
             "current_weights": current_weights,
             "weights_json": weights_json,
             "metrics": metrics,
