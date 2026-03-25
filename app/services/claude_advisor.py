@@ -36,14 +36,17 @@ Quand tu proposes des queries, utilise le format: {"keywords": "...", "location"
 
 
 def _claude_env() -> dict[str, str]:
-    """Build a clean env for the Claude CLI subprocess."""
+    """Build a clean env for the Claude CLI subprocess.
+
+    Do NOT pass ANTHROPIC_API_KEY — the CLI uses its own OAuth profile
+    (setup-token auth). Passing the key overrides OAuth and fails.
+    """
     import os
     home = os.environ.get("HOME", "/home/openclaw")
     return {
         "HOME": home,
         "PATH": f"{home}/.npm-global/bin:{home}/.local/bin:/usr/local/bin:/usr/bin:/bin",
         "NODE_PATH": f"{home}/.npm-global/lib/node_modules",
-        "ANTHROPIC_API_KEY": os.environ.get("ANTHROPIC_API_KEY", ""),
     }
 
 
