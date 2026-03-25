@@ -150,14 +150,46 @@ async def review_prospect(
 
         updated = await repo.find_by_id(prospect_id)
 
-    # Return partial row for htmx swap
+    # For htmx: return the next review card (pipeline flow)
     is_htmx = request.headers.get("HX-Request") == "true"
     if is_htmx:
-        return HTMLResponse(
-            templates.get_template("partials/prospect_row.html").render(
-                {"request": request, "p": updated}
+        # Fetch next unreviewed prospect
+        cursor = await db.execute("""
+            SELECT p.* FROM prospects p
+            LEFT JOIN human_reviews hr ON hr.prospect_id = p.id
+            WHERE hr.id IS NULL AND p.status NOT IN ('rejected', 'converted')
+            ORDER BY p.relevance_score DESC LIMIT 1
+        """)
+        next_row = await cursor.fetchone()
+
+        if next_row:
+            next_p = dict(next_row)
+            experiences = []
+            traits = []
+            if next_p.get("experience_json"):
+                try:
+                    experiences = json.loads(next_p["experience_json"])
+                except (json.JSONDecodeError, TypeError):
+                    pass
+            if next_p.get("traits_json"):
+                try:
+                    traits = json.loads(next_p["traits_json"])
+                except (json.JSONDecodeError, TypeError):
+                    pass
+
+            return HTMLResponse(
+                templates.get_template("dashboard.html").module.render_review_card(
+                    prospect=next_p, experiences=experiences, traits=traits
+                ) if hasattr(templates.get_template("dashboard.html"), 'module') else
+                templates.env.get_template("partials/review_card.html").render(
+                    {"request": request, "prospect": next_p, "experiences": experiences, "traits": traits}
+                )
             )
-        )
+        else:
+            return HTMLResponse("""<div class="empty-state">
+                <div class="empty-icon">&#10003;</div>
+                <p>Tous les prospects ont ete qualifies. Lance un nouveau cycle depuis la page Strategie.</p>
+            </div>""")
 
     return updated
 

@@ -1,167 +1,147 @@
 {% extends "base.html" %}
-{% block title %}Prospects — Okoone CRM{% endblock %}
+{% block title %}Pipeline — Okoone CRM{% endblock %}
 
 {% block content %}
-<div x-data="{ allChecked: false, selectedIds: [] }">
-
-  {# --- Stats bar (htmx partial refresh) --- #}
-  <section id="stats-bar"
-           hx-get="/api/v1/prospects/stats?partial=1"
-           hx-trigger="load"
-           hx-swap="innerHTML">
-    <div class="stats-bar">
-      <div class="stat-card"><div class="stat-value">—</div><div class="stat-label">Chargement...</div></div>
-    </div>
-  </section>
-
-  {# --- Filters --- #}
-  <form class="filters-bar"
-        hx-get="/prospects"
-        hx-target="#prospect-table-body"
-        hx-swap="innerHTML"
-        hx-push-url="true"
-        hx-trigger="change, input delay:300ms from:find(input[name='q'])"
-        hx-indicator="#table-loader">
-
-    <div>
-      <label for="status-filter">Statut</label>
-      <select name="status" id="status-filter">
-        <option value="">Tous</option>
-        <option value="discovered" {% if filters.status == 'discovered' %}selected{% endif %}>Discovered</option>
-        <option value="screened" {% if filters.status == 'screened' %}selected{% endif %}>Screened</option>
-        <option value="qualified" {% if filters.status == 'qualified' %}selected{% endif %}>Qualified</option>
-        <option value="contacted" {% if filters.status == 'contacted' %}selected{% endif %}>Contacted</option>
-        <option value="replied" {% if filters.status == 'replied' %}selected{% endif %}>Replied</option>
-        <option value="converted" {% if filters.status == 'converted' %}selected{% endif %}>Converted</option>
-        <option value="rejected" {% if filters.status == 'rejected' %}selected{% endif %}>Rejected</option>
-      </select>
-    </div>
-
-    <div>
-      <label for="min-score-filter">Score min</label>
-      <input type="range" name="min_score" id="min-score-filter"
-             min="0" max="100" step="5"
-             value="{{ filters.min_score|default(0) }}"
-             style="width:120px;"
-             oninput="this.nextElementSibling.textContent = this.value">
-      <small>{{ filters.min_score|default(0) }}</small>
-    </div>
-
-    <div>
-      <label for="q-filter">Recherche</label>
-      <input type="search" name="q" id="q-filter" placeholder="Nom, entreprise..."
-             value="{{ filters.q|default('') }}">
-    </div>
-
-    <div>
-      <label for="sort-filter">Tri</label>
-      <select name="sort" id="sort-filter">
-        <option value="relevance_score" {% if filters.sort == 'relevance_score' %}selected{% endif %}>Score</option>
-        <option value="created_at" {% if filters.sort == 'created_at' %}selected{% endif %}>Date</option>
-        <option value="full_name" {% if filters.sort == 'full_name' %}selected{% endif %}>Nom</option>
-        <option value="current_company" {% if filters.sort == 'current_company' %}selected{% endif %}>Entreprise</option>
-      </select>
-    </div>
-
-    <div>
-      <label for="order-filter">Ordre</label>
-      <select name="order" id="order-filter">
-        <option value="desc" {% if filters.order == 'desc' %}selected{% endif %}>Desc</option>
-        <option value="asc" {% if filters.order == 'asc' %}selected{% endif %}>Asc</option>
-      </select>
-    </div>
-
-    <input type="hidden" name="page" value="1">
-  </form>
-
-  {# --- Bulk actions --- #}
-  <div class="bulk-bar" x-show="selectedIds.length > 0" x-cloak>
-    <span x-text="selectedIds.length + ' selectionne(s)'"></span>
-    <select x-ref="bulkStatus">
-      <option value="">Changer statut...</option>
-      <option value="qualified">Qualified</option>
-      <option value="contacted">Contacted</option>
-      <option value="rejected">Rejected</option>
-    </select>
-    <button class="outline"
-            @click="
-              if($refs.bulkStatus.value) {
-                fetch('/api/v1/prospects/bulk-status', {
-                  method: 'POST',
-                  headers: {'Content-Type':'application/json'},
-                  body: JSON.stringify({ids: selectedIds, status: $refs.bulkStatus.value})
-                }).then(() => htmx.trigger('#prospect-table-body', 'htmx:load'))
-              }
-            ">Appliquer</button>
-    <select x-ref="bulkCampaign">
-      <option value="">Inscrire campagne...</option>
-      {% for c in campaigns|default([]) %}
-      <option value="{{ c.id }}">{{ c.name }}</option>
-      {% endfor %}
-    </select>
-    <button class="outline"
-            @click="
-              if($refs.bulkCampaign.value) {
-                selectedIds.forEach(pid => {
-                  fetch('/api/v1/campaigns/' + $refs.bulkCampaign.value + '/enroll/' + pid, {method:'POST'})
-                });
-              }
-            ">Inscrire</button>
-  </div>
-
-  {# --- Prospects table --- #}
-  <div style="overflow-x:auto;">
-    <span class="htmx-indicator" id="table-loader" aria-busy="true">Chargement...</span>
-    <table>
-      <thead>
-        <tr>
-          <th style="width:2rem;">
-            <input type="checkbox" style="margin:0;"
-                   @change="allChecked = $event.target.checked; selectedIds = allChecked ? [...document.querySelectorAll('input[name=prospect_ids]')].map(e=>parseInt(e.value)) : []">
-          </th>
-          <th>Nom</th>
-          <th>Poste</th>
-          <th>Entreprise</th>
-          <th>Localisation</th>
-          <th>Score</th>
-          <th>Statut</th>
-          <th>Actions</th>
-        </tr>
-      </thead>
-      <tbody id="prospect-table-body">
-        {% for p in prospects %}
-          {% include "partials/prospect_row.html" %}
-        {% else %}
-          <tr><td colspan="8" class="empty-state"><p>Aucun prospect trouve.</p></td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-
-  {# --- Pagination --- #}
-  <div class="pagination">
-    {% if page > 1 %}
-    <button class="outline"
-            hx-get="/prospects?page={{ page - 1 }}&status={{ filters.status|default('') }}&min_score={{ filters.min_score|default('') }}&q={{ filters.q|default('') }}&sort={{ filters.sort|default('relevance_score') }}&order={{ filters.order|default('desc') }}"
-            hx-target="#prospect-table-body"
-            hx-swap="innerHTML"
-            hx-push-url="true">
-      &laquo; Precedent
-    </button>
-    {% endif %}
-
-    <span class="page-info">Page {{ page }} / {{ total_pages }}</span>
-
-    {% if page < total_pages %}
-    <button class="outline"
-            hx-get="/prospects?page={{ page + 1 }}&status={{ filters.status|default('') }}&min_score={{ filters.min_score|default('') }}&q={{ filters.q|default('') }}&sort={{ filters.sort|default('relevance_score') }}&order={{ filters.order|default('desc') }}"
-            hx-target="#prospect-table-body"
-            hx-swap="innerHTML"
-            hx-push-url="true">
-      Suivant &raquo;
-    </button>
-    {% endif %}
-  </div>
-
+<div class="page-header">
+  <h1>Pipeline</h1>
+  <p class="page-desc">
+    Ici tu qualifies les prospects trouves par Claude. Chaque carte est un lead potentiel.
+    Clique Qualifier, Peut-etre, ou Rejeter — ou utilise les fleches du clavier
+    <span class="kbd">&larr;</span> <span class="kbd">&darr;</span> <span class="kbd">&rarr;</span>
+  </p>
 </div>
+
+<!-- Stats -->
+<div class="stats-row" id="pipeline-stats">
+  <div class="stat-box">
+    <div class="stat-num">{{ stats.total|default(0) }}</div>
+    <div class="stat-label">Total</div>
+  </div>
+  <div class="stat-box accent">
+    <div class="stat-num">{{ stats.pending|default(0) }}</div>
+    <div class="stat-label">A qualifier</div>
+  </div>
+  <div class="stat-box success">
+    <div class="stat-num">{{ stats.qualified|default(0) }}</div>
+    <div class="stat-label">Qualifies</div>
+  </div>
+  <div class="stat-box info">
+    <div class="stat-num">{{ stats.contacted|default(0) }}</div>
+    <div class="stat-label">Contactes</div>
+  </div>
+</div>
+
+<!-- Review card area -->
+<div id="review-area">
+  {% if prospect %}
+  <div class="review-card" id="current-card">
+    <div class="rc-top">
+      <div class="rc-avatar">{{ (prospect.full_name or 'N')[0] }}</div>
+      <div class="rc-info">
+        <h3>{{ prospect.full_name or 'Inconnu' }}</h3>
+        <div class="rc-headline">{{ prospect.headline or '' }}</div>
+        <div class="rc-meta">
+          {% if prospect.current_company %}<span>{{ prospect.current_company }}</span>{% endif %}
+          {% if prospect.location %}<span>{{ prospect.location }}</span>{% endif %}
+        </div>
+      </div>
+    </div>
+
+    {% set score = prospect.relevance_score|default(0)|round|int %}
+    <div class="rc-score {{ 'high' if score >= 70 else 'mid' if score >= 40 else 'low' }}">{{ score }}</div>
+
+    {% if experiences %}
+    <div class="rc-section">
+      <div class="rc-section-title">Experience</div>
+      {% for exp in experiences[:3] %}
+      <div class="rc-experience-item">
+        <strong>{{ exp.title|default('') }}</strong>
+        <span>@ {{ exp.company|default('') }}</span>
+        {% if exp.duration %}<span style="color:var(--muted);"> — {{ exp.duration }}</span>{% endif %}
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    {% if prospect.about_text %}
+    <div class="rc-section">
+      <div class="rc-section-title">A propos</div>
+      <p style="font-size:0.88rem;color:var(--text-secondary);">{{ prospect.about_text[:250] }}{% if prospect.about_text|length > 250 %}...{% endif %}</p>
+    </div>
+    {% endif %}
+
+    {% if traits %}
+    <div class="rc-section">
+      <div class="rc-tags">
+        {% for t in traits %}<span class="rc-tag">{{ t }}</span>{% endfor %}
+      </div>
+    </div>
+    {% endif %}
+
+    {% if prospect.linkedin_url %}
+    <a href="{{ prospect.linkedin_url }}" target="_blank" rel="noopener" style="font-size:0.82rem;display:inline-block;margin-top:0.5rem;">Voir le profil LinkedIn &rarr;</a>
+    {% endif %}
+  </div>
+
+  <!-- Review buttons -->
+  <div class="review-actions">
+    <button class="review-btn reject"
+            hx-post="/api/v1/prospects/{{ prospect.id }}/review"
+            hx-vals='{"verdict": "reject"}'
+            hx-target="#review-area"
+            hx-swap="innerHTML"
+            data-toast="Prospect rejete">
+      <span>
+        <span class="btn-icon">&#10005;</span> Rejeter
+        <span class="btn-hint"><span class="kbd">&larr;</span></span>
+      </span>
+    </button>
+    <button class="review-btn maybe"
+            hx-post="/api/v1/prospects/{{ prospect.id }}/review"
+            hx-vals='{"verdict": "flag"}'
+            hx-target="#review-area"
+            hx-swap="innerHTML"
+            data-toast="Prospect marque peut-etre">
+      <span>
+        <span class="btn-icon">&#63;</span> Peut-etre
+        <span class="btn-hint"><span class="kbd">&darr;</span></span>
+      </span>
+    </button>
+    <button class="review-btn qualify"
+            hx-post="/api/v1/prospects/{{ prospect.id }}/review"
+            hx-vals='{"verdict": "approve"}'
+            hx-target="#review-area"
+            hx-swap="innerHTML"
+            data-toast="Prospect qualifie !">
+      <span>
+        <span class="btn-icon">&#10003;</span> Qualifier
+        <span class="btn-hint"><span class="kbd">&rarr;</span></span>
+      </span>
+    </button>
+  </div>
+  {% else %}
+  <div class="empty-state">
+    <div class="empty-icon">&#10003;</div>
+    <p>Tous les prospects ont ete qualifies. Lance un nouveau cycle de recherche depuis la page Strategie.</p>
+  </div>
+  {% endif %}
+</div>
+
+<!-- Recent decisions -->
+{% if recent_decisions %}
+<div class="decision-list" style="margin-top:2rem;">
+  <h3 style="font-size:0.82rem;color:var(--muted);margin-bottom:0.5rem;text-transform:uppercase;letter-spacing:0.06em;">Decisions recentes</h3>
+  {% for d in recent_decisions %}
+  <div class="decision-item">
+    <span class="decision-dot {{ 'qualified' if d.verdict == 'approve' else 'rejected' if d.verdict == 'reject' else 'maybe' }}"></span>
+    <span style="font-weight:500;">{{ d.full_name }}</span>
+    <span style="color:var(--muted);">{{ d.headline[:50] if d.headline else '' }}</span>
+    <span style="margin-left:auto;" class="pill {{ 'pill-success' if d.verdict == 'approve' else 'pill-error' if d.verdict == 'reject' else 'pill-maybe' }}">
+      {{ 'qualifie' if d.verdict == 'approve' else 'rejete' if d.verdict == 'reject' else 'peut-etre' }}
+    </span>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
 {% endblock %}
