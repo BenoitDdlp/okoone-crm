@@ -117,7 +117,7 @@ async def logout():
     return response
 
 
-from app.routers import dashboard, prospects, searches, campaigns, scraper, eval as eval_router, chat
+from app.routers import dashboard, prospects, searches, campaigns, scraper, eval as eval_router, chat, strategy
 
 app.include_router(dashboard.router)
 app.include_router(prospects.router)
@@ -126,6 +126,7 @@ app.include_router(campaigns.router)
 app.include_router(scraper.router)
 app.include_router(eval_router.router)
 app.include_router(chat.router)
+app.include_router(strategy.router)
 
 
 @app.get("/health")

@@ -8,6 +8,44 @@ from app.config import settings
 
 _DB_PATH = settings.DATABASE_URL.replace("sqlite:///", "")
 
+DEFAULT_PROGRAM = """# Prospect Research Program v1
+
+## Objectif
+Trouver des decideurs tech a Singapour et en Asie du Sud-Est qui pourraient externaliser du developpement digital aupres d'Okoone.
+
+## Profil cible
+- CTO, VP Engineering, Head of Digital, Head of Product, IT Director
+- Startups en croissance (Series A-C) ou PME tech (50-500 employes)
+- Secteurs: fintech, healthtech, edtech, SaaS, e-commerce, proptech
+- Localisation: Singapore prioritaire, puis SEA (Vietnam, Thailand, Indonesia)
+
+## Signaux positifs
+- Recrute des developpeurs (offres ouvertes = besoin de capacite)
+- Petite equipe tech relative a l'ambition produit
+- Background agence/consulting (comprend le modele)
+- Francophone (canal privilegie pour Okoone)
+- Connexions mutuelles avec l'equipe Okoone
+
+## Signaux negatifs
+- Entreprise > 1000 employes avec grosse equipe tech interne
+- Pure consulting/outsourcing (concurrent, pas client)
+- Profil sans experience tech (marketing, sales purs)
+
+## Acquaintances de reference
+(Voir la table acquaintances — ces profils servent d'exemples de ce qu'on cherche)
+
+## Strategie de recherche
+1. Varier les keywords: ne pas toujours chercher "CTO Singapore"
+2. Explorer les connexions de second degre des acquaintances
+3. Chercher dans les entreprises qui recrutent activement des devs
+4. Alterner entre recherche par role et recherche par entreprise
+
+## Metriques de succes
+- Taux de qualification: % de prospects trouves qui sont pertinents (cible > 30%)
+- Diversite: ne pas sur-representer un seul secteur ou titre
+- Nouveaute: % de prospects jamais vus avant (cible > 50% par run)
+"""
+
 
 @asynccontextmanager
 async def get_db() -> AsyncGenerator[aiosqlite.Connection, None]:
@@ -208,6 +246,61 @@ async def init_db() -> None:
                 created_at TEXT DEFAULT (datetime('now'))
             )
         """)
+
+        # --- Autoresearch tables ---
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS prospect_program (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                version INTEGER NOT NULL DEFAULT 1,
+                content TEXT NOT NULL,
+                author TEXT NOT NULL DEFAULT 'human',
+                parent_version INTEGER,
+                run_metric_json TEXT,
+                status TEXT NOT NULL DEFAULT 'active',
+                created_at TEXT DEFAULT (datetime('now'))
+            )
+        """)
+
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS acquaintances (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                full_name TEXT NOT NULL,
+                linkedin_url TEXT,
+                headline TEXT,
+                company TEXT,
+                relationship TEXT,
+                notes TEXT,
+                is_positive_example INTEGER DEFAULT 1,
+                created_at TEXT DEFAULT (datetime('now'))
+            )
+        """)
+
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS research_runs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                program_version INTEGER NOT NULL,
+                started_at TEXT NOT NULL DEFAULT (datetime('now')),
+                finished_at TEXT,
+                status TEXT DEFAULT 'running',
+                prospects_found INTEGER DEFAULT 0,
+                prospects_qualified INTEGER DEFAULT 0,
+                metric_json TEXT,
+                proposed_program TEXT,
+                proposal_reasoning TEXT,
+                proposal_status TEXT DEFAULT 'pending',
+                error_message TEXT
+            )
+        """)
+
+        # Seed default program if empty
+        existing_program = await db.execute_fetchall(
+            "SELECT id FROM prospect_program WHERE status = 'active' LIMIT 1"
+        )
+        if not existing_program:
+            await db.execute(
+                "INSERT INTO prospect_program (version, content, author) VALUES (?, ?, ?)",
+                (1, DEFAULT_PROGRAM, "system"),
+            )
 
         existing = await db.execute_fetchall(
             "SELECT id FROM scoring_weights WHERE name = 'default'"
