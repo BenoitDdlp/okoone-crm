@@ -13,7 +13,7 @@ from datetime import datetime
 from app.config import settings
 
 CLAUDE_CLI = settings.CLAUDE_CLI_PATH or shutil.which("claude") or "claude"
-MODEL = settings.CLAUDE_MODEL or "claude-sonnet-4-20250514"
+MODEL = settings.CLAUDE_MODEL or "claude-opus-4-20250514"
 
 SYSTEM_PROMPT = """Tu es l'assistant IA du CRM de prospection Okoone. Tu aides a ameliorer le screening
 de prospects LinkedIn pour une agence digitale basee en Asie du Sud-Est.
@@ -58,12 +58,18 @@ async def _call_claude(prompt: str, system: str = SYSTEM_PROMPT) -> str:
         env=_claude_env(),
     )
     stdout, stderr = await asyncio.wait_for(
-        proc.communicate(input=full_prompt.encode()), timeout=180
+        proc.communicate(input=full_prompt.encode("utf-8")), timeout=180
     )
     if proc.returncode != 0:
-        error_msg = stderr.decode().strip()[:300] if stderr else f"exit code {proc.returncode}"
-        raise RuntimeError(f"Claude CLI error: {error_msg}")
-    return stdout.decode().strip()
+        err = stderr.decode("utf-8", errors="replace").strip()[:300]
+        out = stdout.decode("utf-8", errors="replace").strip()[:200]
+        import logging
+        logging.getLogger("okoone.claude").error(
+            "Claude CLI failed (rc=%d) stderr=%s stdout=%s prompt_len=%d",
+            proc.returncode, err, out, len(full_prompt),
+        )
+        raise RuntimeError(f"Claude CLI error (rc={proc.returncode}): {err or out or 'no output'}")
+    return stdout.decode("utf-8", errors="replace").strip()
 
 
 class ClaudeAdvisor:
