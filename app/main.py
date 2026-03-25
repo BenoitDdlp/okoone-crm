@@ -28,10 +28,21 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     await init_db()
 
     from apscheduler.schedulers.asyncio import AsyncIOScheduler
+    from app.scheduler.jobs import run_research_loop, LOOP_STATE
 
     scheduler = AsyncIOScheduler()
+    # Background research loop — runs every SCRAPE_INTERVAL_MINUTES
+    scheduler.add_job(
+        run_research_loop,
+        "interval",
+        minutes=settings.SCRAPE_INTERVAL_MINUTES,
+        id="research_loop",
+        replace_existing=True,
+        next_run_time=None,  # Don't start immediately, user activates from UI
+    )
     scheduler.start()
     app.state.scheduler = scheduler
+    app.state.loop_state = LOOP_STATE
 
     yield
 

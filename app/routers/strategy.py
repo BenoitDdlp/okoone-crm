@@ -1,7 +1,10 @@
+from datetime import datetime
+
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
+from app.config import settings
 from app.database import get_db
 from app.services.autoresearch_service import AutoresearchService
 
@@ -10,26 +13,28 @@ templates = Jinja2Templates(directory="templates")
 research = AutoresearchService()
 
 
+def _get_loop_state(request: Request) -> dict:
+    return getattr(request.app.state, "loop_state", {
+        "active": False, "status": "idle", "current_step": None,
+        "last_run_at": None, "cycles_completed": 0,
+        "total_prospects_found": 0, "total_qualified": 0, "last_error": None,
+    })
+
+
 @router.get("/strategy", response_class=HTMLResponse)
 async def strategy_page(request: Request):
     async with get_db() as db:
-        # Active program
         cursor = await db.execute(
             "SELECT version, content FROM prospect_program WHERE status = 'active' ORDER BY version DESC LIMIT 1"
         )
         program = await cursor.fetchone()
 
-        # All versions
-        cursor = await db.execute(
-            "SELECT * FROM prospect_program ORDER BY version DESC LIMIT 20"
-        )
+        cursor = await db.execute("SELECT * FROM prospect_program ORDER BY version DESC LIMIT 20")
         versions = [dict(r) for r in await cursor.fetchall()]
 
-        # Acquaintances
         cursor = await db.execute("SELECT * FROM acquaintances ORDER BY created_at DESC")
         acquaintances = [dict(r) for r in await cursor.fetchall()]
 
-        # Recent runs
         cursor = await db.execute("SELECT * FROM research_runs ORDER BY started_at DESC LIMIT 10")
         runs = [dict(r) for r in await cursor.fetchall()]
 
@@ -42,8 +47,63 @@ async def strategy_page(request: Request):
             "versions": versions,
             "acquaintances": acquaintances,
             "runs": runs,
+            "loop": _get_loop_state(request),
+            "interval": settings.SCRAPE_INTERVAL_MINUTES,
             "active_nav": "strategy",
         },
+    )
+
+
+@router.get("/api/v1/strategy/loop-status", response_class=HTMLResponse)
+async def loop_status(request: Request):
+    """Polled every 5s by the UI to show live loop state."""
+    loop = _get_loop_state(request)
+    return HTMLResponse(
+        templates.env.get_template("partials/loop_status.html").render({
+            "request": request,
+            "loop": loop,
+            "interval": settings.SCRAPE_INTERVAL_MINUTES,
+        })
+    )
+
+
+@router.post("/api/v1/strategy/loop/start", response_class=HTMLResponse)
+async def start_loop(request: Request):
+    """Activate the background research loop."""
+    loop = _get_loop_state(request)
+    loop["active"] = True
+    loop["status"] = "sleeping"
+    loop["current_step"] = "Boucle activee. Premier cycle demarre..."
+
+    # Trigger immediate first run
+    scheduler = request.app.state.scheduler
+    job = scheduler.get_job("research_loop")
+    if job:
+        job.modify(next_run_time=datetime.now())
+
+    return HTMLResponse(
+        templates.env.get_template("partials/loop_status.html").render({
+            "request": request,
+            "loop": loop,
+            "interval": settings.SCRAPE_INTERVAL_MINUTES,
+        })
+    )
+
+
+@router.post("/api/v1/strategy/loop/stop", response_class=HTMLResponse)
+async def stop_loop(request: Request):
+    """Pause the background research loop."""
+    loop = _get_loop_state(request)
+    loop["active"] = False
+    loop["status"] = "idle"
+    loop["current_step"] = None
+
+    return HTMLResponse(
+        templates.env.get_template("partials/loop_status.html").render({
+            "request": request,
+            "loop": loop,
+            "interval": settings.SCRAPE_INTERVAL_MINUTES,
+        })
     )
 
 
