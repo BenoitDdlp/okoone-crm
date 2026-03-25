@@ -48,17 +48,20 @@ def _claude_env() -> dict[str, str]:
 
 
 async def _call_claude(prompt: str, system: str = SYSTEM_PROMPT) -> str:
-    """Call Claude via CLI. Uses create_subprocess_exec (no shell injection)."""
+    """Call Claude via CLI, passing the prompt via stdin (supports long prompts)."""
     full_prompt = f"{system}\n\n---\n\n{prompt}" if system else prompt
     proc = await asyncio.create_subprocess_exec(
-        CLAUDE_CLI, "-p", full_prompt, "--model", MODEL,
+        CLAUDE_CLI, "-p", "-", "--model", MODEL,
+        stdin=asyncio.subprocess.PIPE,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
         env=_claude_env(),
     )
-    stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=120)
+    stdout, stderr = await asyncio.wait_for(
+        proc.communicate(input=full_prompt.encode()), timeout=180
+    )
     if proc.returncode != 0:
-        error_msg = stderr.decode().strip()[:200] if stderr else f"exit code {proc.returncode}"
+        error_msg = stderr.decode().strip()[:300] if stderr else f"exit code {proc.returncode}"
         raise RuntimeError(f"Claude CLI error: {error_msg}")
     return stdout.decode().strip()
 
