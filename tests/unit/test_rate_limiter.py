@@ -95,6 +95,9 @@ def test_get_remaining() -> None:
 def test_get_stats() -> None:
     """``get_stats`` should return a dict with used/remaining per action type."""
     rl = RateLimiter(daily_search_limit=30, daily_profile_limit=80)
+
+    # Pin reset_date to today so _maybe_reset_daily does NOT clear the counts
+    rl._reset_date = time.strftime("%Y-%m-%d")
     rl._counts["search"] = 5
     rl._counts["profile"] = 20
 

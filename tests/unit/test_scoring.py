@@ -141,10 +141,23 @@ async def test_full_scoring_pipeline(
 
 
 @pytest.mark.asyncio
-async def test_custom_weights(
-    scorer: ScoringService, sample_prospect: dict
-) -> None:
-    """Different weight distributions should produce different scores."""
+async def test_custom_weights(scorer: ScoringService) -> None:
+    """Different weight distributions should produce different scores.
+
+    We use a prospect whose scores diverge sharply across criteria so
+    that shifting weights from one dimension to another changes the total.
+    """
+    # Prospect: great title (CTO) but unknown/low location
+    prospect = {
+        "current_title": "CTO",
+        "headline": "CTO at SmallCo",
+        "location": "Nairobi, Kenya",  # not in any tier => 0.1
+        "current_company": "SmallCo",
+        "experience_json": "[]",
+        "education_json": "[]",
+        "skills_json": "[]",
+    }
+
     # Weight set A: heavily favours location
     weights_a = {
         "title_match": 5,
@@ -167,14 +180,19 @@ async def test_custom_weights(
         "activity": 5,
     }
 
-    score_a, _ = await scorer.score_prospect(sample_prospect, weights_a)
-    score_b, _ = await scorer.score_prospect(sample_prospect, weights_b)
+    score_a, _ = await scorer.score_prospect(prospect, weights_a)
+    score_b, _ = await scorer.score_prospect(prospect, weights_b)
 
     # Both should be valid scores
     assert 0 <= score_a <= 100
     assert 0 <= score_b <= 100
 
-    # They should differ since the prospect excels in different criteria
+    # With location=0.1 weighted heavily (A) vs title=1.0 weighted heavily (B),
+    # the scores must differ.
     assert score_a != score_b, (
         f"Different weights should produce different scores: A={score_a}, B={score_b}"
+    )
+    # Title-heavy should score higher because CTO = 1.0 vs location = 0.1
+    assert score_b > score_a, (
+        f"Title-heavy score ({score_b}) should exceed location-heavy ({score_a})"
     )

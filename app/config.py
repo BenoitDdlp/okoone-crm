@@ -6,6 +6,8 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     APP_NAME: str = "Okoone CRM"
     API_KEY: str
+    DASHBOARD_PASSWORD: str = "okoone2026"
+    SESSION_SECRET: str = "change-me-session-secret"
     DATABASE_URL: str = "sqlite:///db/okoone_crm.sqlite"
     HOST: str = "0.0.0.0"
     PORT: int = 4567

@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="fr" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Login — Okoone CRM</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+  <style>
+    body { display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+    .login-card { max-width: 360px; width: 100%; }
+    .login-card h1 { font-size: 1.5rem; text-align: center; margin-bottom: 0.25rem; }
+    .login-card p { text-align: center; font-size: 0.85rem; color: var(--pico-muted-color); margin-bottom: 1.5rem; }
+    .error { color: #ef4444; font-size: 0.85rem; text-align: center; margin-bottom: 1rem; }
+  </style>
+</head>
+<body>
+  <div class="login-card">
+    <h1>Okoone CRM</h1>
+    <p>Prospecting Dashboard</p>
+    {% if error %}
+    <div class="error">Mot de passe incorrect.</div>
+    {% endif %}
+    <form method="post" action="/login">
+      <input type="password" name="password" placeholder="Mot de passe" autofocus required>
+      <button type="submit" style="width:100%;">Connexion</button>
+    </form>
+  </div>
+</body>
+</html>
