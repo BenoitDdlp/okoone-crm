@@ -1,4 +1,4 @@
-"""Extract LinkedIn cookies from local Patchright/MCP profile and output as JSON.
+"""Extract ALL LinkedIn cookies (including httpOnly) via CDP.
 
 Usage: python scripts/extract_linkedin_cookies.py
 """
@@ -28,9 +28,14 @@ async def main():
     await page.goto("https://www.linkedin.com/feed/", wait_until="domcontentloaded", timeout=15000)
     await asyncio.sleep(2)
 
-    cookies = await context.cookies(["https://www.linkedin.com"])
-    linkedin_cookies = [c for c in cookies if "linkedin" in c.get("domain", "")]
+    # Use CDP to get ALL cookies including httpOnly
+    cdp = await context.new_cdp_session(page)
+    result = await cdp.send("Network.getAllCookies")
+    all_cookies = result.get("cookies", [])
 
+    linkedin_cookies = [c for c in all_cookies if "linkedin" in c.get("domain", "")]
+
+    await cdp.detach()
     await context.close()
     await pw.stop()
 
