@@ -13,7 +13,7 @@ from datetime import datetime
 from app.config import settings
 
 CLAUDE_CLI = settings.CLAUDE_CLI_PATH or shutil.which("claude") or "claude"
-MODEL = settings.CLAUDE_MODEL or "claude-opus-4-20250514"
+MODEL = settings.CLAUDE_MODEL or "claude-opus-4-6"
 
 SYSTEM_PROMPT = """Tu es l'assistant IA du CRM de prospection Okoone. Tu aides a ameliorer le screening
 de prospects LinkedIn pour une agence digitale basee en Asie du Sud-Est.
