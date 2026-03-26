@@ -209,4 +209,87 @@
   </div>
   {% endfor %}
 </div>
-{% endif %} {% endblock %}
+{% endif %}
+
+<!-- Prospects table -->
+<div class="section-card" style="margin-top: 2rem">
+  <h2
+    style="
+      font-family: var(--font-accent);
+      font-size: 1.15rem;
+      font-weight: 500;
+      margin-bottom: 0.75rem;
+    "
+  >
+    Tous les prospects
+  </h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Score</th>
+        <th>Nom</th>
+        <th>Titre</th>
+        <th>Entreprise</th>
+        <th>Location</th>
+        <th>Status</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for p in all_prospects %}
+      <tr
+        hx-get="/prospects/{{ p.id }}"
+        hx-target="#review-area"
+        hx-swap="innerHTML"
+        style="cursor: pointer"
+      >
+        <td>
+          {% set s = p.relevance_score|default(0)|round|int %}
+          <span
+            class="badge-score {{ 'high' if s >= 70 else 'mid' if s >= 40 else 'low' }}"
+            >{{ s }}</span
+          >
+        </td>
+        <td style="font-weight: 500; color: var(--text)">
+          {{ p.full_name or '?' }}
+        </td>
+        <td>{{ (p.headline or '')[:40] }}</td>
+        <td>{{ p.current_company or '' }}</td>
+        <td>{{ p.location or '' }}</td>
+        <td>
+          <span
+            class="pill {{ 'pill-success' if p.status == 'qualified' else 'pill-error' if p.status == 'rejected' else 'pill-warning' if p.status == 'screened' else 'pill-muted' }}"
+            >{{ p.status }}</span
+          >
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% if total_pages > 1 %}
+  <div class="pagination">
+    {% if page > 1 %}
+    <button
+      hx-get="/prospects?page={{ page - 1 }}"
+      hx-target="main"
+      hx-swap="innerHTML"
+      hx-push-url="true"
+    >
+      &larr; Precedent
+    </button>
+    {% endif %}
+    <span class="page-info">Page {{ page }}/{{ total_pages }}</span>
+    {% if page < total_pages %}
+    <button
+      hx-get="/prospects?page={{ page + 1 }}"
+      hx-target="main"
+      hx-swap="innerHTML"
+      hx-push-url="true"
+    >
+      Suivant &rarr;
+    </button>
+    {% endif %}
+  </div>
+  {% endif %}
+</div>
+
+{% endblock %}

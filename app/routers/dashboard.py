@@ -19,8 +19,10 @@ async def index(request: Request):
 
 
 @router.get("/prospects", response_class=HTMLResponse)
-async def pipeline(request: Request):
+async def pipeline(request: Request, page: int = 1):
     """Main pipeline view — card-based prospect qualification."""
+    PAGE_SIZE = 20
+
     async with get_db() as db:
         # Stats
         cursor = await db.execute("""
@@ -46,6 +48,7 @@ async def pipeline(request: Request):
 
         experiences = []
         traits = []
+        score_breakdown: Optional[dict] = None
         if prospect:
             if prospect.get("experience_json"):
                 try:
@@ -55,6 +58,13 @@ async def pipeline(request: Request):
             if prospect.get("traits_json"):
                 try:
                     traits = json.loads(prospect["traits_json"])
+                except (json.JSONDecodeError, TypeError):
+                    pass
+            if prospect.get("score_breakdown"):
+                try:
+                    parsed = json.loads(prospect["score_breakdown"])
+                    if isinstance(parsed, dict):
+                        score_breakdown = parsed
                 except (json.JSONDecodeError, TypeError):
                     pass
 
@@ -67,6 +77,17 @@ async def pipeline(request: Request):
         """)
         recent_decisions = [dict(r) for r in await cursor.fetchall()]
 
+        # All prospects (paginated)
+        offset = (page - 1) * PAGE_SIZE
+        all_cursor = await db.execute(
+            "SELECT * FROM prospects ORDER BY relevance_score DESC LIMIT ? OFFSET ?",
+            (PAGE_SIZE, offset),
+        )
+        all_prospects = [dict(r) for r in await all_cursor.fetchall()]
+        total_cursor = await db.execute("SELECT COUNT(*) FROM prospects")
+        total_count = (await total_cursor.fetchone())[0]
+        total_pages = max(1, -(-total_count // PAGE_SIZE))
+
     return templates.TemplateResponse(
         request,
         "dashboard.html",
@@ -75,7 +96,11 @@ async def pipeline(request: Request):
             "prospect": prospect,
             "experiences": experiences,
             "traits": traits,
+            "score_breakdown": score_breakdown,
             "recent_decisions": recent_decisions,
+            "all_prospects": all_prospects,
+            "page": page,
+            "total_pages": total_pages,
             "active_nav": "pipeline",
         },
     )
