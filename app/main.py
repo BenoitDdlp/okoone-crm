@@ -28,17 +28,33 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     await init_db()
 
     from apscheduler.schedulers.asyncio import AsyncIOScheduler
-    from app.scheduler.jobs import run_research_loop, LOOP_STATE
+    from app.scheduler.jobs import run_research_loop, LOOP_STATE, set_scraper
+    from app.scraper.linkedin import LinkedInScraper
+    from app.scraper.rate_limiter import RateLimiter
 
+    # Scraper: lazy-init (browser starts on first search, not at boot)
+    rate_limiter = RateLimiter(
+        account_created_date=settings.LINKEDIN_ACCOUNT_CREATED,
+        max_daily_profiles=settings.LINKEDIN_DAILY_PROFILE_LIMIT,
+        max_daily_searches=settings.LINKEDIN_DAILY_SEARCH_LIMIT,
+    )
+    scraper = LinkedInScraper(
+        profile_dir=settings.LINKEDIN_PROFILE_DIR,
+        rate_limiter=rate_limiter,
+    )
+    app.state.scraper = scraper
+    app.state.rate_limiter = rate_limiter
+    set_scraper(scraper, rate_limiter)
+
+    # Background loop
     scheduler = AsyncIOScheduler()
-    # Background research loop — runs every SCRAPE_INTERVAL_MINUTES
     scheduler.add_job(
         run_research_loop,
         "interval",
         minutes=settings.SCRAPE_INTERVAL_MINUTES,
         id="research_loop",
         replace_existing=True,
-        next_run_time=None,  # Don't start immediately, user activates from UI
+        next_run_time=None,
     )
     scheduler.start()
     app.state.scheduler = scheduler
@@ -47,6 +63,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     yield
 
     scheduler.shutdown()
+    await scraper.stop()
 
 
 app = FastAPI(title=settings.APP_NAME, version=VERSION, lifespan=lifespan)

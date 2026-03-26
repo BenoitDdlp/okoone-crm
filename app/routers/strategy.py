@@ -210,13 +210,14 @@ async def delete_acquaintance(acq_id: int):
 
 
 @router.post("/api/v1/strategy/run", response_class=HTMLResponse)
-async def trigger_research_run():
-    """Manual run: Claude CLI searches LinkedIn via MCP tools, stores + scores results."""
+async def trigger_research_run(request: Request):
+    """Manual run: Claude generates queries → Patchright scrapes LinkedIn → score + store."""
     import json as _json
-    import re
-    from app.services.claude_advisor import _call_claude
+    from app.scraper.rate_limiter import DailyLimitReached
     from app.services.scoring_service import ScoringService
     from app.repositories.prospect_repo import ProspectRepository
+
+    scraper = request.app.state.scraper
 
     async with get_db() as db:
         # Step 1: Claude generates queries from program
@@ -224,36 +225,39 @@ async def trigger_research_run():
         if not queries:
             return _toast_html("Claude n'a genere aucune query.", "error")
 
+        # Step 2: Start scraper browser if not running
+        if not scraper._browser:
+            try:
+                await scraper.start()
+            except Exception as e:
+                return _toast_html(f"Impossible de demarrer le navigateur: {str(e)[:100]}", "error")
+
+        # Step 3: Check LinkedIn session
+        if not await scraper.is_session_valid():
+            return _toast_html(
+                "Session LinkedIn expiree. Connecte-toi sur le VPS : "
+                "ssh -X openclaw@46.250.239.50 puis "
+                "cd okoone-crm && .venv/bin/python -m app.scraper.session_manager --login",
+                "error",
+            )
+
         repo = ProspectRepository(db)
         scoring = ScoringService()
         total_found = 0
         total_new = 0
         errors: list[str] = []
 
-        # Step 2: For each query, ask Claude CLI to search LinkedIn via MCP
-        for q in queries[:5]:
+        # Step 4: Scrape LinkedIn with Patchright (real scraping!)
+        for q in queries[:5]:  # Max 5 per manual run (new account safety)
+            kw = q["keywords"]
+            loc = q.get("location")
             try:
-                kw = q["keywords"]
-                loc = q.get("location", "")
-                loc_part = f" in {loc}" if loc else ""
-
-                search_prompt = (
-                    f"Use the search_people MCP tool to search LinkedIn for: {kw}{loc_part}. "
-                    f"Return ONLY a JSON array of results with fields: "
-                    f"full_name, headline, location, profile_username. No other text."
-                )
-                raw = await _call_claude(search_prompt, system="Return only valid JSON array.")
-                match = re.search(r"\[.*\]", raw, re.DOTALL)
-                if not match:
-                    errors.append(f"'{kw[:25]}': pas de JSON")
-                    continue
-
-                results = _json.loads(match.group())
+                results = await scraper.search_people(kw, loc)
                 total_found += len(results)
 
                 cursor = await db.execute(
                     "INSERT INTO search_queries (keywords, location) VALUES (?, ?)",
-                    (kw, loc or None),
+                    (kw, loc),
                 )
                 await db.commit()
 
@@ -274,10 +278,13 @@ async def trigger_research_run():
                         total_new += 1
                 await db.commit()
 
+            except DailyLimitReached as e:
+                errors.append(f"Rate limit atteint: {e}")
+                break
             except Exception as e:
-                errors.append(f"'{q['keywords'][:25]}': {str(e)[:60]}")
+                errors.append(f"'{kw[:25]}': {str(e)[:60]}")
 
-        # Step 3: Score all unscored prospects
+        # Step 5: Score all unscored prospects
         scored = 0
         cursor = await db.execute(
             "SELECT id FROM prospects WHERE relevance_score = 0 OR relevance_score IS NULL"
@@ -301,7 +308,7 @@ async def trigger_research_run():
                     scored += 1
             await db.commit()
 
-        # Step 4: Record run
+        # Step 6: Record run
         v_cursor = await db.execute(
             "SELECT version FROM prospect_program WHERE status = 'active' ORDER BY version DESC LIMIT 1"
         )
@@ -309,16 +316,31 @@ async def trigger_research_run():
         await db.execute("""
             INSERT INTO research_runs
                 (program_version, finished_at, status, prospects_found, prospects_qualified)
-            VALUES (?, datetime('now'), 'completed', ?, ?)
-        """, (v[0] if v else 0, total_new, scored))
+            VALUES (?, datetime('now'), ?, ?, ?)
+        """, (v[0] if v else 0, "completed" if total_new > 0 else "no_results", total_new, scored))
         await db.commit()
 
+        rate_stats = request.app.state.rate_limiter.get_stats()
         err_html = f"<br><span style='color:var(--error);'>{'; '.join(errors[:3])}</span>" if errors else ""
-        return f"""<div style="padding:1rem;border:1px solid var(--success);border-radius:var(--radius-sm);font-size:0.88rem;background:var(--success-dim);">
+
+        if total_new == 0 and not errors:
+            return _toast_html(
+                f"{len(queries[:5])} queries executees mais 0 nouveaux prospects. "
+                "Le scraper fonctionne mais les resultats sont vides ou deja connus. "
+                "Essaie de modifier le Programme pour varier les recherches.",
+                "warning",
+            )
+
+        return HTMLResponse(f"""<div style="padding:1rem;border:1px solid var(--success);border-radius:var(--radius-sm);font-size:0.88rem;background:var(--success-dim);">
             <strong>Cycle termine</strong><br>
-            {len(queries[:5])} queries | {total_found} resultats | {total_new} nouveaux | {scored} scores
+            {len(queries[:5])} queries | {total_found} resultats LinkedIn | {total_new} nouveaux prospects | {scored} scores<br>
+            <span style="color:var(--muted);font-size:0.8rem;">
+                Rate limits: {rate_stats['search']['used']}/{rate_stats['search']['limit']} recherches,
+                {rate_stats['profile']['used']}/{rate_stats['profile']['limit']} profils
+                (compte: {rate_stats['account_age_weeks']} sem.)
+            </span>
             {err_html}
-        </div>"""
+        </div>""")
 
 
 def _toast_html(msg: str, kind: str = "info") -> HTMLResponse:

@@ -1,64 +1,127 @@
-<div style="display:flex;align-items:center;justify-content:space-between;">
+<div style="display: flex; align-items: center; justify-content: space-between">
   <div>
-    <h2 style="margin-bottom:0.15rem;">Boucle de recherche</h2>
-    <p class="section-desc" style="margin-bottom:0;">
-      Quand c'est actif, Claude cherche en continu de nouveaux prospects,
-      les evalue, et propose des ameliorations au programme.
-      Un cycle tourne toutes les {{ interval }} minutes.
+    <h2 style="margin-bottom: 0.15rem">Boucle de recherche</h2>
+    <p class="section-desc" style="margin-bottom: 0">
+      Quand c'est actif, Claude genere des requetes, Patchright scrape LinkedIn,
+      et les prospects sont scores automatiquement. Cycle toutes les {{ interval
+      }} minutes.
     </p>
   </div>
-  <div style="display:flex;align-items:center;gap:1rem;">
+  <div style="display: flex; align-items: center; gap: 1rem">
     {% if loop.active %}
-    <button hx-post="/api/v1/strategy/loop/stop"
-            hx-target="#loop-section"
-            hx-swap="innerHTML"
-            data-toast="Boucle arretee"
-            style="background:var(--error-dim);border-color:rgba(248,113,113,0.3);color:var(--error);">
+    <button
+      hx-post="/api/v1/strategy/loop/stop"
+      hx-target="#loop-section"
+      hx-swap="innerHTML"
+      data-toast="Boucle arretee"
+      style="
+        background: var(--error-dim);
+        border-color: rgba(248, 113, 113, 0.3);
+        color: var(--error);
+      "
+    >
       Arreter
     </button>
     {% else %}
-    <button class="btn-primary"
-            hx-post="/api/v1/strategy/loop/start"
-            hx-target="#loop-section"
-            hx-swap="innerHTML"
-            data-toast="Boucle activee ! Claude cherche en continu.">
+    <button
+      class="btn-primary"
+      hx-post="/api/v1/strategy/loop/start"
+      hx-target="#loop-section"
+      hx-swap="innerHTML"
+      data-toast="Boucle activee !"
+    >
       Activer la boucle
     </button>
     {% endif %}
   </div>
 </div>
 
-{% if loop.active %}
-<div class="loop-indicator" style="margin-top:1rem;">
+{% if loop.status == 'session_expired' %}
+<div
+  style="
+    margin-top: 0.75rem;
+    padding: 0.75rem;
+    border: 1px solid var(--error);
+    border-radius: var(--radius-sm);
+    background: var(--error-dim);
+    font-size: 0.88rem;
+  "
+>
+  <strong>Session LinkedIn expiree.</strong> Reconnecte-toi :
+  <code style="font-size: 0.8rem">ssh -X openclaw@46.250.239.50</code> puis
+  <code style="font-size: 0.8rem"
+    >cd okoone-crm && .venv/bin/python -m app.scraper.session_manager
+    --login</code
+  >
+</div>
+
+{% elif loop.status == 'rate_limited' %}
+<div
+  style="
+    margin-top: 0.75rem;
+    padding: 0.75rem;
+    border: 1px solid var(--accent);
+    border-radius: var(--radius-sm);
+    background: var(--accent-dim);
+    font-size: 0.88rem;
+  "
+>
+  <strong>Rate limit LinkedIn atteint.</strong> Le scraping reprendra demain
+  automatiquement.
+</div>
+
+{% elif loop.consecutive_empty_runs|default(0) >= 3 %}
+<div
+  style="
+    margin-top: 0.75rem;
+    padding: 0.75rem;
+    border: 1px solid var(--accent);
+    border-radius: var(--radius-sm);
+    background: var(--accent-dim);
+    font-size: 0.88rem;
+  "
+>
+  <strong>{{ loop.consecutive_empty_runs }} cycles sans resultat.</strong>
+  Les requetes ne trouvent rien. Modifie le Programme ou ajoute des
+  Acquaintances pour guider Claude.
+</div>
+
+{% elif loop.active %}
+<div class="loop-indicator" style="margin-top: 0.75rem">
   <span class="loop-dot"></span>
   <span>{{ loop.current_step or 'En attente du prochain cycle...' }}</span>
 </div>
-{% endif %}
-
-{% if loop.last_run_at or loop.last_error %}
-<div style="display:flex;gap:2rem;margin-top:0.75rem;font-size:0.85rem;">
+{% endif %} {% if loop.last_error and loop.status == 'error' %}
+<div
+  style="
+    margin-top: 0.75rem;
+    padding: 0.75rem;
+    border: 1px solid var(--error);
+    border-radius: var(--radius-sm);
+    background: var(--error-dim);
+    font-size: 0.85rem;
+  "
+>
+  <strong>Erreur:</strong> {{ loop.last_error[:150] }}
+</div>
+{% endif %} {% if loop.last_run_at or loop.cycles_completed %}
+<div style="display: flex; gap: 2rem; margin-top: 0.75rem; font-size: 0.85rem">
   {% if loop.last_run_at %}
   <div>
-    <span style="color:var(--muted);">Dernier cycle:</span>
-    <span>{{ loop.last_run_at }}</span>
+    <span style="color: var(--muted)">Dernier cycle:</span> {{ loop.last_run_at
+    }}
   </div>
   {% endif %}
   <div>
-    <span style="color:var(--muted);">Cycles:</span>
-    <span>{{ loop.cycles_completed }}</span>
+    <span style="color: var(--muted)">Cycles:</span> {{ loop.cycles_completed }}
   </div>
   <div>
-    <span style="color:var(--muted);">Prospects trouves:</span>
-    <span>{{ loop.total_prospects_found }}</span>
+    <span style="color: var(--muted)">Prospects trouves:</span> {{
+    loop.total_prospects_found }}
   </div>
   <div>
-    <span style="color:var(--muted);">Qualifies:</span>
-    <span style="color:var(--success);">{{ loop.total_qualified }}</span>
+    <span style="color: var(--muted)">Qualifies:</span>
+    <span style="color: var(--success)">{{ loop.total_qualified }}</span>
   </div>
-  {% if loop.last_error %}
-  <div>
-    <span style="color:var(--error);">Erreur: {{ loop.last_error[:80] }}</span>
-  </div>
-  {% endif %}
 </div>
 {% endif %}

@@ -17,13 +17,14 @@ class Settings(BaseSettings):
 
     FERNET_KEY: str
 
-    LINKEDIN_DAILY_SEARCH_LIMIT: int = 30
-    LINKEDIN_DAILY_PROFILE_LIMIT: int = 80
+    LINKEDIN_DAILY_SEARCH_LIMIT: int = 15
+    LINKEDIN_DAILY_PROFILE_LIMIT: int = 50
+    LINKEDIN_PROFILE_DIR: str = "/home/openclaw/.okoone-linkedin/profile"
+    LINKEDIN_ACCOUNT_CREATED: str = "2026-03-25"
 
     ANTHROPIC_API_KEY: str = ""
     CLAUDE_CLI_PATH: str = ""
-    CLAUDE_MODEL: str = "claude-sonnet-4-20250514"
-    LINKEDIN_ACCOUNT_CREATED: str = "2026-03-25"
+    CLAUDE_MODEL: str = "claude-opus-4-6"
 
     LEARNING_REVIEW_THRESHOLD: int = 20
     SCRAPE_INTERVAL_MINUTES: int = 60
