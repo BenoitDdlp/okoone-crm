@@ -81,6 +81,14 @@ class AutoresearchService:
             for a in acquaintances
         ) if acquaintances else "Aucune acquaintance definie."
 
+        # Load previously used keywords to avoid duplicates
+        async with db.execute(
+            "SELECT keywords FROM search_queries ORDER BY created_at DESC LIMIT 50"
+        ) as cursor:
+            used_keywords = [row[0] for row in await cursor.fetchall()]
+
+        used_text = "\n".join(f"- {kw}" for kw in used_keywords[:30]) if used_keywords else "Aucune (premier cycle)."
+
         prompt = f"""## Programme de recherche (v{version})
 {program}
 
@@ -90,11 +98,15 @@ class AutoresearchService:
 ## Derniers resultats (30 recents)
 {recent}
 
+## Keywords DEJA UTILISES (ne PAS les reutiliser)
+{used_text}
+
 ---
 
-Genere 5-8 requetes de recherche LinkedIn variees et intelligentes basees sur le programme.
+Genere 5-8 requetes de recherche LinkedIn NOUVELLES et DIFFERENTES des keywords deja utilises.
+Varie les titres, secteurs, localisations, et formulations pour maximiser la diversite des prospects.
 Pour chaque requete, donne:
-- keywords: les mots-cles LinkedIn
+- keywords: les mots-cles LinkedIn (DIFFERENTS des precedents)
 - location: la localisation (ou null)
 - reasoning: pourquoi cette requete est pertinente
 

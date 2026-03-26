@@ -135,9 +135,65 @@ async def run_research_loop() -> None:
                 except Exception:
                     logger.error("SCRAPE ERROR for '%s':", kw, exc_info=True)
 
-            # --- Step 5: Score new prospects ---
+            # --- Step 4.5: Deep screening (fetch full profiles) ---
             LOOP_STATE["status"] = "evaluating"
-            LOOP_STATE["current_step"] = f"{total_new} nouveaux prospects. Scoring..."
+            deep_screened = 0
+            # Get prospects that have no experience data yet
+            shallow_cursor = await db.execute(
+                "SELECT id, linkedin_username FROM prospects "
+                "WHERE (experience_json IS NULL OR experience_json = '' OR experience_json = '[]') "
+                "AND linkedin_username IS NOT NULL "
+                "ORDER BY created_at DESC LIMIT 10"
+            )
+            shallow_prospects = await shallow_cursor.fetchall()
+            logger.info("DEEP SCREEN: %d prospects need full profile fetch", len(shallow_prospects))
+
+            for i, sp in enumerate(shallow_prospects):
+                pid, username = sp[0], sp[1]
+                LOOP_STATE["current_step"] = f"Deep screening {i+1}/{len(shallow_prospects)}: {username}..."
+                try:
+                    profile = await _scraper.get_person_profile(username)
+                    if profile:
+                        update_data = {}
+                        if profile.get("full_name"):
+                            update_data["full_name"] = profile["full_name"]
+                        if profile.get("headline"):
+                            update_data["headline"] = profile["headline"]
+                        if profile.get("location"):
+                            update_data["location"] = profile["location"]
+                        if profile.get("about"):
+                            update_data["about_text"] = profile["about"]
+                        if profile.get("current_company"):
+                            update_data["current_company"] = profile["current_company"]
+                        if profile.get("current_title"):
+                            update_data["current_title"] = profile["current_title"]
+                        if profile.get("experience"):
+                            update_data["experience_json"] = json.dumps(profile["experience"])
+                        if profile.get("education"):
+                            update_data["education_json"] = json.dumps(profile["education"])
+                        if profile.get("skills"):
+                            update_data["skills_json"] = json.dumps(profile["skills"])
+                        if profile.get("profile_photo_url"):
+                            update_data["profile_photo_url"] = profile["profile_photo_url"]
+                        update_data["screened_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+                        if update_data:
+                            await repo.update(pid, update_data)
+                            deep_screened += 1
+                            logger.info("DEEP SCREEN [%d] %s → %s @ %s",
+                                        pid, profile.get("full_name", "?"),
+                                        profile.get("current_title", "?"),
+                                        profile.get("current_company", "?"))
+                except DailyLimitReached:
+                    logger.warning("DEEP SCREEN rate limit reached after %d profiles", deep_screened)
+                    break
+                except Exception:
+                    logger.error("DEEP SCREEN ERROR for %s:", username, exc_info=True)
+            await db.commit()
+            logger.info("DEEP SCREEN complete: %d profiles enriched", deep_screened)
+
+            # --- Step 5: Score new prospects ---
+            LOOP_STATE["current_step"] = f"{total_new} nouveaux + {deep_screened} enrichis. Scoring..."
 
             scored = 0
             cursor = await db.execute(
@@ -158,9 +214,11 @@ async def run_research_loop() -> None:
                     prospect = await repo.find_by_id(pid)
                     if prospect:
                         score, breakdown = await scoring.score_prospect(prospect, weights)
+                        summary = scoring.generate_score_summary(breakdown, weights)
                         await repo.update(pid, {
                             "relevance_score": score,
                             "score_breakdown": json.dumps(breakdown),
+                            "score_summary": summary,
                             "status": "screened",
                         })
                         scored += 1

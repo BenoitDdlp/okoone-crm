@@ -302,6 +302,12 @@ async def init_db() -> None:
                 (1, DEFAULT_PROGRAM, "system"),
             )
 
+        # Migration: add score_summary column if missing
+        try:
+            await db.execute("ALTER TABLE prospects ADD COLUMN score_summary TEXT")
+        except Exception:
+            pass  # column already exists
+
         existing = await db.execute_fetchall(
             "SELECT id FROM scoring_weights WHERE name = 'default'"
         )

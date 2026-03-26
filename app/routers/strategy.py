@@ -300,9 +300,11 @@ async def trigger_research_run(request: Request):
                 prospect = await repo.find_by_id(pid)
                 if prospect:
                     score, breakdown = await scoring.score_prospect(prospect, weights)
+                    summary = scoring.generate_score_summary(breakdown, weights)
                     await repo.update(pid, {
                         "relevance_score": score,
                         "score_breakdown": _json.dumps(breakdown),
+                        "score_summary": summary,
                         "status": "screened",
                     })
                     scored += 1

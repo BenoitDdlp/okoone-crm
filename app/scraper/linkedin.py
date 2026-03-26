@@ -12,7 +12,7 @@ import logging
 import random
 from urllib.parse import quote
 
-from app.scraper.parser import parse_profile_page, parse_search_results
+from app.scraper.parser import parse_search_results
 from app.scraper.rate_limiter import RateLimiter
 
 logger = logging.getLogger(__name__)
@@ -336,6 +336,11 @@ class LinkedInScraper:
     async def get_person_profile(self, username: str) -> dict:
         """Fetch and parse a full LinkedIn profile by username.
 
+        Uses ``page.evaluate()`` with JavaScript to extract data directly from
+        the DOM.  This approach is resilient to LinkedIn's CSS-class obfuscation
+        because it anchors on ``section`` tags, ``h2`` text content, ``data-*``
+        attributes, and ``aria-*`` attributes rather than class names.
+
         Returns a structured dict including experience, education, skills, etc.
         """
         if not self._page:
@@ -346,18 +351,358 @@ class LinkedInScraper:
         url = f"https://www.linkedin.com/in/{quote(username, safe='')}/"
         logger.info("Fetching LinkedIn profile: %s", username)
         await self._page.goto(url, wait_until="domcontentloaded")
-        await self._human_scroll()
 
-        # Give the page a moment to finish lazy-loading sections
+        # Scroll aggressively to trigger lazy-loaded sections (experience,
+        # education, skills, etc.) before we attempt extraction.
+        for _ in range(6):
+            await self._page.mouse.wheel(0, random.randint(400, 700))
+            await asyncio.sleep(random.uniform(0.4, 0.9))
+        # Scroll back to top so the main profile card is in the viewport
+        await self._page.evaluate("window.scrollTo(0, 0)")
         await asyncio.sleep(random.uniform(1.5, 3.0))
 
-        content = await self._page.content()
-        profile = parse_profile_page(content, username)
-        logger.info(
-            "Parsed profile for %s (%s)",
-            profile.get("full_name", "?"),
-            username,
-        )
+        # Try clicking "Show all skills" if the button is visible
+        try:
+            show_skills_btn = await self._page.query_selector(
+                'a[href*="/details/skills"], button >> text=/[Ss]how all.*skill/'
+            )
+            if show_skills_btn and await show_skills_btn.is_visible():
+                logger.info("Clicking 'Show all skills' button")
+                await show_skills_btn.click()
+                await asyncio.sleep(random.uniform(1.5, 2.5))
+                # If it navigated to a sub-page, go back after extracting
+        except Exception:
+            logger.debug("No 'Show all skills' button found or click failed", exc_info=True)
+
+        profile = await self._page.evaluate("""(username) => {
+            // ============================================================
+            // Helper: find a <section> whose h2 contains the given heading
+            // ============================================================
+            function findSection(headingText) {
+                const sections = document.querySelectorAll('section');
+                for (const sec of sections) {
+                    const h2 = sec.querySelector('h2');
+                    if (!h2) continue;
+                    // h2 may wrap text in nested spans; use textContent
+                    const txt = (h2.textContent || '').trim();
+                    if (txt.toLowerCase().includes(headingText.toLowerCase())) {
+                        return sec;
+                    }
+                }
+                // Fallback: look for section with id containing the heading
+                for (const sec of sections) {
+                    const id = sec.getAttribute('id') || '';
+                    if (id.toLowerCase().includes(headingText.toLowerCase())) {
+                        return sec;
+                    }
+                }
+                return null;
+            }
+
+            // Helper: get visible non-empty text from an element
+            function visibleText(el) {
+                if (!el) return '';
+                return (el.textContent || '').replace(/\\s+/g, ' ').trim();
+            }
+
+            // Helper: get all visible <span> texts inside an element, skipping
+            // those that only contain whitespace or are sr-only.
+            function getSpanTexts(el) {
+                if (!el) return [];
+                const spans = el.querySelectorAll('span[aria-hidden="true"]');
+                const texts = [];
+                for (const s of spans) {
+                    const t = (s.textContent || '').replace(/\\s+/g, ' ').trim();
+                    if (t) texts.push(t);
+                }
+                // If no aria-hidden spans, fall back to all spans
+                if (texts.length === 0) {
+                    el.querySelectorAll('span').forEach(s => {
+                        const t = (s.textContent || '').replace(/\\s+/g, ' ').trim();
+                        if (t && t.length > 1) texts.push(t);
+                    });
+                }
+                return texts;
+            }
+
+            const result = {
+                username: username,
+                full_name: '',
+                headline: '',
+                location: '',
+                about: '',
+                current_company: '',
+                current_title: '',
+                experience: [],
+                education: [],
+                skills: [],
+                profile_photo_url: ''
+            };
+
+            // ---- Name (h1 in the top card / main section) ----
+            try {
+                const h1 = document.querySelector('h1');
+                if (h1) result.full_name = visibleText(h1);
+                // Fallback: og:title meta
+                if (!result.full_name) {
+                    const og = document.querySelector('meta[property="og:title"]');
+                    if (og) {
+                        result.full_name = (og.getAttribute('content') || '')
+                            .replace(/\\s*\\|\\s*LinkedIn.*$/, '').trim();
+                    }
+                }
+            } catch(e) {}
+
+            // ---- Headline (text right below h1) ----
+            try {
+                // The headline is typically in a div sibling just below h1.
+                // Strategy: find h1's parent, then look for the next div
+                const h1 = document.querySelector('h1');
+                if (h1) {
+                    // Walk siblings of h1 or its parent
+                    let container = h1.parentElement;
+                    if (container) {
+                        const divs = container.parentElement
+                            ? container.parentElement.querySelectorAll('div')
+                            : container.querySelectorAll('div');
+                        for (const d of divs) {
+                            const t = visibleText(d);
+                            if (t && t !== result.full_name && t.length > 3 && t.length < 300) {
+                                // Skip if it looks like a location or connections line
+                                if (t.includes('connections') || t.includes('followers')) continue;
+                                result.headline = t;
+                                break;
+                            }
+                        }
+                    }
+                }
+                // Fallback: look for div[data-generated-suggestion-target]
+                if (!result.headline) {
+                    const hDiv = document.querySelector('div[data-generated-suggestion-target]');
+                    if (hDiv) result.headline = visibleText(hDiv);
+                }
+            } catch(e) {}
+
+            // ---- Location ----
+            try {
+                // Location often sits in a span near h1's section, sometimes
+                // with class containing "location" or near a map-pin svg.
+                const topCard = document.querySelector('h1')?.closest('section')
+                    || document.querySelector('h1')?.closest('main')
+                    || document.querySelector('main');
+                if (topCard) {
+                    // Look for a span whose text looks like a location (not
+                    // connections/followers). LinkedIn sometimes uses a span
+                    // right after the headline area.
+                    const spans = topCard.querySelectorAll('span');
+                    for (const s of spans) {
+                        const t = (s.textContent || '').trim();
+                        // Location patterns: "City, Country" or "Greater X Area"
+                        if (t && t.length > 3 && t.length < 120
+                            && !t.includes('connections') && !t.includes('followers')
+                            && !t.includes('Contact info')
+                            && t !== result.full_name && t !== result.headline) {
+                            // Heuristic: contains a comma or known geo terms
+                            if (t.includes(',') || /region|area|france|paris|london|new york|singapore|city|country/i.test(t)) {
+                                result.location = t;
+                                break;
+                            }
+                        }
+                    }
+                }
+                // Fallback: look for geo_location in meta or JSON-LD
+                if (!result.location) {
+                    const geo = document.querySelector('meta[name="geo.placename"]');
+                    if (geo) result.location = geo.getAttribute('content') || '';
+                }
+            } catch(e) {}
+
+            // ---- About ----
+            try {
+                const aboutSection = findSection('About') || document.querySelector('section#about');
+                if (aboutSection) {
+                    // Prefer aria-hidden span inside a show-more block
+                    const ariaSpan = aboutSection.querySelector('span[aria-hidden="true"]');
+                    if (ariaSpan) {
+                        result.about = visibleText(ariaSpan);
+                    } else {
+                        // Fallback: grab all text after the h2
+                        const h2 = aboutSection.querySelector('h2');
+                        if (h2) {
+                            let t = visibleText(aboutSection);
+                            const heading = visibleText(h2);
+                            t = t.replace(heading, '').trim();
+                            result.about = t;
+                        }
+                    }
+                }
+            } catch(e) {}
+
+            // ---- Profile photo ----
+            try {
+                // Profile photo img usually has alt containing the person's name
+                const name = result.full_name;
+                if (name) {
+                    const imgs = document.querySelectorAll('img');
+                    for (const img of imgs) {
+                        const alt = img.getAttribute('alt') || '';
+                        if (alt.includes(name) && img.src && img.src.startsWith('http')) {
+                            result.profile_photo_url = img.src;
+                            break;
+                        }
+                    }
+                }
+                // Fallback: og:image
+                if (!result.profile_photo_url) {
+                    const ogImg = document.querySelector('meta[property="og:image"]');
+                    if (ogImg) result.profile_photo_url = ogImg.getAttribute('content') || '';
+                }
+            } catch(e) {}
+
+            // ---- Experience ----
+            try {
+                const expSection = findSection('Experience') || document.querySelector('section#experience');
+                if (expSection) {
+                    const items = expSection.querySelectorAll('li');
+                    for (const li of items) {
+                        const spans = getSpanTexts(li);
+                        if (spans.length === 0) continue;
+
+                        // Heuristic: first span is usually the title, second is
+                        // company (sometimes with " · Full-time"), third is duration
+                        let title = spans[0] || '';
+                        let company = spans.length >= 2 ? spans[1] : '';
+                        let duration = spans.length >= 3 ? spans[2] : '';
+                        let description = '';
+
+                        // Clean company: remove employment type suffix
+                        company = company.replace(/\\s*·\\s*(Full-time|Part-time|Contract|Freelance|Internship|Self-employed|Seasonal|Apprenticeship).*$/i, '').trim();
+
+                        // If the title looks like a company name (contains "·"), swap
+                        if (title.includes(' · ')) {
+                            const parts = title.split(' · ');
+                            title = parts[0].trim();
+                        }
+
+                        // Look for a longer text block that might be a description
+                        const descSpan = li.querySelector('[class*="inline-show-more-text"] span[aria-hidden="true"]');
+                        if (descSpan) {
+                            description = visibleText(descSpan);
+                        }
+
+                        // Skip noise items (endorsements, "Show all" links, etc.)
+                        if (!title || /^\\d+$/.test(title) || /show (all|more)/i.test(title)) continue;
+
+                        result.experience.push({
+                            company: company,
+                            title: title,
+                            duration: duration,
+                            description: description
+                        });
+                    }
+
+                    // Deduplicate by title+company
+                    const seen = new Set();
+                    result.experience = result.experience.filter(e => {
+                        const key = (e.title + '|' + e.company).toLowerCase();
+                        if (seen.has(key)) return false;
+                        seen.add(key);
+                        return true;
+                    });
+                }
+            } catch(e) {}
+
+            // Populate current company/title from first experience
+            if (result.experience.length > 0) {
+                result.current_company = result.experience[0].company;
+                result.current_title = result.experience[0].title;
+            }
+
+            // ---- Education ----
+            try {
+                const eduSection = findSection('Education') || document.querySelector('section#education');
+                if (eduSection) {
+                    const items = eduSection.querySelectorAll('li');
+                    for (const li of items) {
+                        const spans = getSpanTexts(li);
+                        if (spans.length === 0) continue;
+
+                        let school = spans[0] || '';
+                        let degree = spans.length >= 2 ? spans[1] : '';
+                        let field = '';
+                        let years = '';
+
+                        // Degree + field may be combined: "Bachelor's degree, CS"
+                        if (degree.includes(',')) {
+                            const parts = degree.split(',', 2);
+                            degree = parts[0].trim();
+                            field = parts[1].trim();
+                        }
+
+                        // Look for year range in the remaining spans
+                        for (let i = 2; i < spans.length; i++) {
+                            const yrMatch = spans[i].match(/(\\d{4})\\s*[-–]\\s*(\\d{4}|Present)/);
+                            if (yrMatch) {
+                                years = yrMatch[1] + ' - ' + yrMatch[2];
+                                break;
+                            }
+                        }
+
+                        // Skip noise
+                        if (!school || /^\\d+$/.test(school) || /show (all|more)/i.test(school)) continue;
+
+                        result.education.push({
+                            school: school,
+                            degree: degree,
+                            field: field,
+                            years: years
+                        });
+                    }
+
+                    // Deduplicate
+                    const seen = new Set();
+                    result.education = result.education.filter(e => {
+                        const key = (e.school + '|' + e.degree).toLowerCase();
+                        if (seen.has(key)) return false;
+                        seen.add(key);
+                        return true;
+                    });
+                }
+            } catch(e) {}
+
+            // ---- Skills ----
+            try {
+                const skillsSection = findSection('Skills') || document.querySelector('section#skills');
+                if (skillsSection) {
+                    const spans = getSpanTexts(skillsSection);
+                    const seen = new Set();
+                    const noise = /^\\d+$|endorse|see\\s+all|show\\s+(more|less)|^skill$/i;
+                    for (const s of spans) {
+                        const t = s.trim();
+                        if (t && !seen.has(t.toLowerCase()) && !noise.test(t)
+                            && t.length < 100 && t !== 'Skills') {
+                            seen.add(t.toLowerCase());
+                            result.skills.push(t);
+                        }
+                    }
+                }
+            } catch(e) {}
+
+            return result;
+        }""", username)
+
+        # Log extraction results for each field
+        logger.info("Extracted profile for %s (%s)", profile.get("full_name", "?"), username)
+        logger.info("  headline: %s", (profile.get("headline") or "")[:80])
+        logger.info("  location: %s", profile.get("location") or "(empty)")
+        logger.info("  about: %s", (profile.get("about") or "")[:100] + ("..." if len(profile.get("about") or "") > 100 else ""))
+        logger.info("  current_company: %s", profile.get("current_company") or "(empty)")
+        logger.info("  current_title: %s", profile.get("current_title") or "(empty)")
+        logger.info("  experience: %d entries", len(profile.get("experience", [])))
+        logger.info("  education: %d entries", len(profile.get("education", [])))
+        logger.info("  skills: %d entries — %s", len(profile.get("skills", [])), ", ".join(profile.get("skills", [])[:5]))
+        logger.info("  profile_photo_url: %s", "yes" if profile.get("profile_photo_url") else "(empty)")
+
         return profile
 
     # -------------------------------------------------------------- #

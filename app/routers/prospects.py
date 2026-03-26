@@ -166,6 +166,7 @@ async def review_prospect(
             next_p = dict(next_row)
             experiences = []
             traits = []
+            score_breakdown = {}
             if next_p.get("experience_json"):
                 try:
                     experiences = json.loads(next_p["experience_json"])
@@ -176,13 +177,16 @@ async def review_prospect(
                     traits = json.loads(next_p["traits_json"])
                 except (json.JSONDecodeError, TypeError):
                     pass
+            if next_p.get("score_breakdown"):
+                try:
+                    score_breakdown = json.loads(next_p["score_breakdown"])
+                except (json.JSONDecodeError, TypeError):
+                    pass
 
             return HTMLResponse(
-                templates.get_template("dashboard.html").module.render_review_card(
-                    prospect=next_p, experiences=experiences, traits=traits
-                ) if hasattr(templates.get_template("dashboard.html"), 'module') else
                 templates.env.get_template("partials/review_card.html").render(
-                    {"request": request, "prospect": next_p, "experiences": experiences, "traits": traits}
+                    {"request": request, "prospect": next_p, "experiences": experiences,
+                     "traits": traits, "score_breakdown": score_breakdown}
                 )
             )
         else:
@@ -192,6 +196,64 @@ async def review_prospect(
             </div>""")
 
     return updated
+
+
+@router.post("/deep-screen-all")
+async def deep_screen_all(request: Request):
+    """Deep screen all prospects that don't have experience data yet."""
+    import logging
+    logger = logging.getLogger("okoone.deep_screen")
+    scraper = request.app.state.scraper
+
+    if not scraper:
+        return {"error": "Scraper not initialized"}
+
+    if not scraper._browser:
+        await scraper.start()
+
+    if not await scraper.is_session_valid():
+        return {"error": "LinkedIn session expired"}
+
+    async with get_db() as db:
+        repo = ProspectRepository(db)
+        cursor = await db.execute(
+            "SELECT id, linkedin_username FROM prospects "
+            "WHERE (experience_json IS NULL OR experience_json = '' OR experience_json = '[]') "
+            "AND linkedin_username IS NOT NULL "
+            "ORDER BY relevance_score DESC LIMIT 50"
+        )
+        to_screen = await cursor.fetchall()
+
+        screened = 0
+        errors = 0
+        for sp in to_screen:
+            pid, username = sp[0], sp[1]
+            try:
+                profile = await scraper.get_person_profile(username)
+                if profile:
+                    update_data = {"screened_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")}
+                    for k, db_k in [("full_name", "full_name"), ("headline", "headline"),
+                                     ("location", "location"), ("about", "about_text"),
+                                     ("current_company", "current_company"),
+                                     ("current_title", "current_title"),
+                                     ("profile_photo_url", "profile_photo_url")]:
+                        if profile.get(k):
+                            update_data[db_k] = profile[k]
+                    for k in ("experience", "education", "skills"):
+                        if profile.get(k):
+                            update_data[f"{k}_json"] = json.dumps(profile[k])
+
+                    await repo.update(pid, update_data)
+                    screened += 1
+                    logger.info("Deep screened %s: %s @ %s", username, profile.get("full_name"), profile.get("current_company"))
+            except Exception as e:
+                errors += 1
+                logger.error("Deep screen error for %s: %s", username, str(e)[:100])
+                if "DailyLimitReached" in str(type(e).__name__):
+                    break
+        await db.commit()
+
+    return {"screened": screened, "errors": errors, "total": len(to_screen)}
 
 
 @router.post("/bulk-status")

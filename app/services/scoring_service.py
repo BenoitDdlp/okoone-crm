@@ -140,6 +140,56 @@ class ScoringService:
         return round(total * 100, 1), breakdown
 
     # ------------------------------------------------------------------
+    # Score summary
+    # ------------------------------------------------------------------
+
+    CRITERION_LABELS: dict[str, tuple[str, str]] = {
+        "title_match": ("Titre decision-maker", "Titre non-cible"),
+        "company_fit": ("Entreprise tech/startup", "Entreprise hors-cible"),
+        "seniority": ("Seniority C-level/VP", "Seniority trop junior"),
+        "industry": ("Secteur tech/digital", "Secteur non-tech"),
+        "location": ("Localisation Singapore/SEA", "Localisation eloignee"),
+        "completeness": ("Profil complet", "Profil incomplet"),
+        "activity": ("Profil actif", "Profil inactif"),
+    }
+
+    def generate_score_summary(self, breakdown: dict, weights: dict) -> str:
+        """Generate a short pro/con summary from the score breakdown."""
+        pros: list[str] = []
+        cons: list[str] = []
+        mid: list[str] = []
+
+        for key, value in breakdown.items():
+            labels = self.CRITERION_LABELS.get(key)
+            if not labels:
+                continue
+            pos_label, neg_label = labels
+            if value >= 0.7:
+                pros.append(f"+ {pos_label} ({value})")
+            elif value <= 0.3:
+                cons.append(f"- {neg_label} ({value})")
+            else:
+                mid.append((key, value))
+
+        lines = pros + cons
+
+        # If fewer than 3 bullets, fill from mid-range criteria
+        if len(lines) < 3:
+            for key, value in mid:
+                if len(lines) >= 3:
+                    break
+                labels = self.CRITERION_LABELS.get(key)
+                if not labels:
+                    continue
+                pos_label, neg_label = labels
+                if value >= 0.5:
+                    lines.append(f"+ {pos_label} ({value})")
+                else:
+                    lines.append(f"- {neg_label} ({value})")
+
+        return "\n".join(lines)
+
+    # ------------------------------------------------------------------
     # Individual scoring functions — each returns 0.0..1.0
     # ------------------------------------------------------------------
 
