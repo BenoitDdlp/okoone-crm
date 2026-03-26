@@ -65,8 +65,27 @@ async def login():
     )
     page = ctx.pages[0] if ctx.pages else await ctx.new_page()
     await page.goto('https://www.linkedin.com/login')
+    import time
+    await asyncio.sleep(3)
+
+    # Auto-click 'Welcome Back' account if present (saves manual click)
+    try:
+        welcome_btn = await page.query_selector('button[data-tracking-control-name=\"cold_join_sign_in\"], div[data-test-id=\"profile-card\"], a[href*=\"/login/submit\"]')
+        if not welcome_btn:
+            # Look for any clickable card with the account name
+            cards = await page.query_selector_all('div[role=\"button\"], button')
+            for card in cards:
+                text = await card.text_content()
+                if text and ('gmail.com' in text.lower() or 'benoit' in text.lower() or 'ddlp' in text.lower()):
+                    print('>> Auto-clicking Welcome Back account...')
+                    await card.click()
+                    await asyncio.sleep(5)
+                    break
+    except Exception as e:
+        print(f'Auto-click failed (manual login needed): {e}')
+
     print()
-    print('>> Login dans le navigateur VNC, puis attends le redirect vers /feed/')
+    print('>> Si tu vois Welcome Back, le script a clique automatiquement.')
     print('>> Appuie Ctrl+C quand tu es connecte')
     print()
     try:
