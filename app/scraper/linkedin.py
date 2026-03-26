@@ -206,28 +206,68 @@ class LinkedInScraper:
         await self._page.goto(query, wait_until="domcontentloaded")
         await self._human_scroll()
 
-        # Wait briefly for JS-rendered content to settle
-        await asyncio.sleep(random.uniform(1.0, 2.0))
+        # Wait for JS rendering
+        await asyncio.sleep(random.uniform(2.0, 4.0))
 
-        content = await self._page.content()
-        logger.info("Page HTML length: %d chars, URL: %s", len(content), self._page.url)
+        # Extract results via JS — more reliable than HTML regex parsing
+        # LinkedIn obfuscates class names, but href="/in/..." and data attributes are stable
+        results = await self._page.evaluate("""() => {
+            const cards = document.querySelectorAll('[data-view-name="search-entity-result-universal-template"]');
+            const results = [];
+            for (const card of cards) {
+                const link = card.querySelector('a[href*="/in/"]');
+                if (!link) continue;
+                const href = link.getAttribute('href') || '';
+                const usernameMatch = href.match(/\\/in\\/([^/?]+)/);
+                if (!usernameMatch) continue;
 
-        # Log a snippet to debug parser issues
-        if "reusable-search" in content:
-            logger.info("HTML contains 'reusable-search' markers (good)")
-        else:
-            logger.warning("HTML does NOT contain 'reusable-search' markers — parser may fail")
-            # Log visible text to understand what LinkedIn returned
+                // Get all text content from the card
+                const texts = [];
+                card.querySelectorAll('span').forEach(s => {
+                    const t = s.textContent.trim();
+                    if (t && t.length > 1 && t.length < 200) texts.push(t);
+                });
+
+                // First meaningful text is usually the name
+                const name = texts[0] || '';
+                // Find headline (usually after connection degree indicator)
+                let headline = '';
+                let location = '';
+                for (let i = 1; i < texts.length; i++) {
+                    const t = texts[i];
+                    if (t.includes('1st') || t.includes('2nd') || t.includes('3rd')) continue;
+                    if (t === 'Connect' || t === 'Follow' || t === 'Message') continue;
+                    if (!headline && t.length > 5) {
+                        headline = t;
+                    } else if (!location && t.length > 2 && headline) {
+                        location = t;
+                        break;
+                    }
+                }
+
+                results.push({
+                    full_name: name,
+                    headline: headline,
+                    location: location,
+                    linkedin_url: 'https://www.linkedin.com/in/' + usernameMatch[1] + '/',
+                    profile_username: usernameMatch[1],
+                });
+            }
+            return results;
+        }""")
+
+        logger.info("Extracted %d results via JS for '%s'", len(results), keywords)
+        for i, r in enumerate(results[:3]):
+            logger.info("  [%d] %s — %s (%s)", i, r.get("full_name"), r.get("headline", "")[:50], r.get("profile_username"))
+
+        if not results:
+            # Fallback: try to extract from visible text
             try:
                 visible = await self._page.inner_text("body")
-                logger.info("Page visible text (first 500): %s", visible[:500].replace("\n", " | "))
+                logger.warning("0 results via JS. Visible text: %s", visible[:500].replace("\n", " | "))
             except Exception:
                 pass
 
-        results = parse_search_results(content)
-        logger.info("Parsed %d results for '%s'", len(results), keywords)
-        if not results:
-            logger.warning("0 results parsed. Raw HTML snippet: %s", content[5000:6000].replace("\n", "")[:300])
         return results
 
     # -------------------------------------------------------------- #
