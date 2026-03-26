@@ -59,15 +59,24 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.rate_limiter = rate_limiter
     set_scraper(scraper, rate_limiter)
 
-    # Background loop
+    # Background loop — ALWAYS ON by default (Karpathy pattern: never stop)
+    from datetime import datetime as _dt
     scheduler = AsyncIOScheduler()
+    if settings.LOOP_ALWAYS_ON:
+        LOOP_STATE["active"] = True
+        LOOP_STATE["status"] = "sleeping"
+        LOOP_STATE["current_step"] = "Boucle auto-demarree. Premier cycle dans 30s..."
+        first_run = _dt.now()  # start immediately
+    else:
+        first_run = None  # manual activation from UI
+
     scheduler.add_job(
         run_research_loop,
         "interval",
         minutes=settings.SCRAPE_INTERVAL_MINUTES,
         id="research_loop",
         replace_existing=True,
-        next_run_time=None,
+        next_run_time=first_run,
     )
     scheduler.start()
     app.state.scheduler = scheduler

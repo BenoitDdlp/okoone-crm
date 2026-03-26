@@ -135,15 +135,20 @@ class AutoresearchService:
     ) -> dict:
         """Compute rich metrics for a single cycle.
 
+        KEY INSIGHT (Karpathy pattern): The PRIMARY metric is the HUMAN
+        approval rate, not the automatic score. Human reviews are our val_bpb.
+        - If humans approve prospects → the program is working → keep
+        - If humans reject prospects → the program is wrong → change
+
         Returns {
-            qualification_rate, novelty_rate, diversity_score,
-            avg_score, total_found, total_qualified,
-            industries, locations, top_queries
+            qualification_rate, human_approval_rate, novelty_rate,
+            diversity_score, avg_score, total_found, total_qualified,
+            human_approved, human_rejected, industries, locations
         }
         """
         total_found = len(new_prospect_ids)
 
-        # Qualification rate: % of prospects scored > 50
+        # Auto-qualification rate: % of prospects scored > 50
         if evaluations:
             qualified = sum(1 for e in evaluations if (e.get("score") or 0) > 50)
             qualification_rate = (qualified / len(evaluations) * 100) if evaluations else 0
@@ -153,17 +158,30 @@ class AutoresearchService:
             qualification_rate = 0
             avg_score = 0
 
-        # Novelty rate: % new (not seen before this cycle)
-        # All prospects in new_prospect_ids are new by definition (just created),
-        # but we compare against total DB to measure saturation
+        # HUMAN approval rate — THIS IS THE REAL METRIC (like val_bpb)
+        # Counts all human reviews from the last 7 days
+        async with db.execute("""
+            SELECT
+                SUM(CASE WHEN reviewer_verdict = 'approve' THEN 1 ELSE 0 END) as approved,
+                SUM(CASE WHEN reviewer_verdict = 'reject' THEN 1 ELSE 0 END) as rejected,
+                COUNT(*) as total_reviewed
+            FROM human_reviews
+            WHERE reviewed_at > datetime('now', '-7 days')
+        """) as cursor:
+            hr = dict(await cursor.fetchone())
+        human_approved = hr.get("approved") or 0
+        human_rejected = hr.get("rejected") or 0
+        human_total = hr.get("total_reviewed") or 0
+        human_approval_rate = (human_approved / human_total * 100) if human_total > 0 else 0
+
+        # Novelty rate
         total_in_db = 0
         async with db.execute("SELECT COUNT(*) FROM prospects") as cursor:
             row = await cursor.fetchone()
             total_in_db = row[0] if row else 0
-
         novelty_rate = (total_found / total_in_db * 100) if total_in_db > 0 else 100
 
-        # Diversity: count distinct industries (from headline/company) and locations
+        # Diversity
         industries: set[str] = set()
         locations: set[str] = set()
         if new_prospect_ids:
@@ -177,11 +195,13 @@ class AutoresearchService:
                         industries.add(row[1].strip().lower())
                     if row[2]:
                         locations.add(row[2].strip().lower())
-
         diversity_score = len(industries) + len(locations)
 
         return {
             "qualification_rate": round(qualification_rate, 1),
+            "human_approval_rate": round(human_approval_rate, 1),
+            "human_approved": human_approved,
+            "human_rejected": human_rejected,
             "novelty_rate": round(novelty_rate, 1),
             "diversity_score": diversity_score,
             "avg_score": round(avg_score, 1),
@@ -406,6 +426,8 @@ Reponds en JSON array:
             for i, m in enumerate(metrics_history):
                 metrics_text_lines.append(
                     f"Cycle {m.get('run_id', '?')} (v{m.get('program_version', '?')}, {m.get('started_at', '?')}):\n"
+                    f"  - human_approval_rate: {m.get('human_approval_rate', 'N/A')}% (METRIQUE PRINCIPALE)\n"
+                    f"  - human_approved: {m.get('human_approved', 0)} | human_rejected: {m.get('human_rejected', 0)}\n"
                     f"  - qualification_rate: {m.get('qualification_rate', 'N/A')}%\n"
                     f"  - novelty_rate: {m.get('novelty_rate', 'N/A')}%\n"
                     f"  - diversity_score: {m.get('diversity_score', 'N/A')}\n"
@@ -465,12 +487,23 @@ Taux de qualification humain: {human_qual_rate:.0f}%
 
 ---
 
-Tu es un chercheur qui ameliore iterativement un programme de recherche de prospects.
-Analyse les metriques et propose une version amelioree du programme.
+Tu es un chercheur autonome qui ameliore iterativement un programme de recherche de prospects.
+Tu suis le pattern Karpathy autoresearch: mesurer, comparer, garder/jeter, repeter.
+
+## TA METRIQUE PRINCIPALE: le taux d'approbation humaine (human_approval_rate)
+
+C'est l'equivalent du val_bpb de Karpathy. Quand un humain approuve un prospect, ca veut dire
+que le programme fonctionne. Quand il rejette, le programme doit changer.
 
 ## Instructions d'analyse
 
-1. **Tendance des metriques**: Compare les metriques entre les cycles.
+1. **Human approval rate** (LA metrique qui compte):
+   - Taux actuel: {human_qual_rate:.0f}% ({approved} approuves, {stats.get('rejected', 0)} rejetes)
+   - Si < 20%: le programme est MAUVAIS, changements radicaux necessaires
+   - Si 20-50%: le programme est MOYEN, ajustements cibles
+   - Si > 50%: le programme est BON, optimisations fines
+
+2. **Tendance des metriques automatiques**:
    - Le qualification_rate s'ameliore-t-il? (cible > 30%)
    - Le novelty_rate baisse-t-il? (si < 20%, on sature les memes profils)
    - Le diversity_score evolue-t-il? (plus = mieux)

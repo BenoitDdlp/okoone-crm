@@ -27,9 +27,10 @@ class Settings(BaseSettings):
     CLAUDE_MODEL: str = "claude-opus-4-6"
 
     LEARNING_REVIEW_THRESHOLD: int = 20
-    SCRAPE_INTERVAL_MINUTES: int = 60
+    SCRAPE_INTERVAL_MINUTES: int = 30
 
-    AUTO_ACCEPT_IMPROVEMENTS: bool = False
+    AUTO_ACCEPT_IMPROVEMENTS: bool = True
+    LOOP_ALWAYS_ON: bool = True
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 

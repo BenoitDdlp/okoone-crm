@@ -77,25 +77,27 @@ async def run_research_loop() -> None:
                 await _scraper.start()
 
             # --- Step 3: Check LinkedIn session ---
-            if not await _scraper.is_session_valid():
-                LOOP_STATE["status"] = "session_expired"
-                LOOP_STATE["current_step"] = "Session LinkedIn expiree. Reconnexion necessaire."
-                LOOP_STATE["last_error"] = "Session LinkedIn expiree"
-                LOOP_STATE["active"] = False  # Stop the loop
-                return
+            session_valid = await _scraper.is_session_valid()
+            if not session_valid:
+                LOOP_STATE["last_error"] = "Session LinkedIn expiree — scraping skipped, analyse continue"
+                logger.warning("LinkedIn session expired — skipping scrape, continuing with analysis/improvement")
+                # DON'T stop the loop — still do analysis + improvement steps
+                # The loop NEVER STOPS (Karpathy: "do NOT pause to ask the human")
 
-            # --- Step 4: Scrape LinkedIn ---
+            # --- Step 4: Scrape LinkedIn (only if session valid) ---
             total_found = 0
             total_new = 0
             from app.repositories.prospect_repo import ProspectRepository
 
             repo = ProspectRepository(db)
-
-            # Track which prospect IDs came from which query (for performance tracking)
             query_prospect_map: dict[str, list[int]] = {}
 
-            for i, q in enumerate(queries[:5]):
-                kw = q["keywords"]
+            if not session_valid:
+                logger.info("SCRAPE SKIPPED (session expired) — jumping to analysis steps")
+
+            if session_valid:
+                for i, q in enumerate(queries[:5]):
+                    kw = q["keywords"]
                 loc = q.get("location")
                 query_key = f"{kw}||{loc or ''}"
                 query_prospect_map[query_key] = []
