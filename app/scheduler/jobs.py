@@ -98,52 +98,52 @@ async def run_research_loop() -> None:
             if session_valid:
                 for i, q in enumerate(queries[:5]):
                     kw = q["keywords"]
-                loc = q.get("location")
-                query_key = f"{kw}||{loc or ''}"
-                query_prospect_map[query_key] = []
-                logger.info("SCRAPE [%d/%d] keywords='%s' location='%s'", i + 1, min(len(queries), 5), kw, loc)
-                LOOP_STATE["current_step"] = f"Recherche {i+1}/{min(len(queries), 5)}: {kw[:40]}..."
+                    loc = q.get("location")
+                    query_key = f"{kw}||{loc or ''}"
+                    query_prospect_map[query_key] = []
+                    logger.info("SCRAPE [%d/%d] keywords='%s' location='%s'", i + 1, min(len(queries), 5), kw, loc)
+                    LOOP_STATE["current_step"] = f"Recherche {i+1}/{min(len(queries), 5)}: {kw[:40]}..."
 
-                try:
-                    results = await _scraper.search_people(kw, loc)
-                    logger.info("SCRAPE [%d/%d] got %d results", i + 1, min(len(queries), 5), len(results))
-                    for j, r in enumerate(results[:3]):
-                        logger.info("  result[%d]: %s", j, {k: str(v)[:50] for k, v in r.items()})
-                    total_found += len(results)
+                    try:
+                        results = await _scraper.search_people(kw, loc)
+                        logger.info("SCRAPE [%d/%d] got %d results", i + 1, min(len(queries), 5), len(results))
+                        for j, r in enumerate(results[:3]):
+                            logger.info("  result[%d]: %s", j, {k: str(v)[:50] for k, v in r.items()})
+                        total_found += len(results)
 
-                    cursor = await db.execute(
-                        "INSERT INTO search_queries (keywords, location) VALUES (?, ?)",
-                        (kw, loc),
-                    )
-                    await db.commit()
+                        cursor = await db.execute(
+                            "INSERT INTO search_queries (keywords, location) VALUES (?, ?)",
+                            (kw, loc),
+                        )
+                        await db.commit()
 
-                    for p in results:
-                        username = (p.get("profile_username") or "").strip("/").split("/")[-1]
-                        if not username or len(username) < 2:
-                            logger.debug("  skipping result with no username: %s", p.get("full_name"))
-                            continue
-                        pid, is_new = await repo.upsert_by_username(username, {
-                            "full_name": p.get("full_name", ""),
-                            "headline": p.get("headline", ""),
-                            "location": p.get("location", ""),
-                            "linkedin_url": f"https://www.linkedin.com/in/{username}/",
-                            "linkedin_username": username,
-                            "source_search_id": cursor.lastrowid,
-                            "scraped_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                        })
-                        if is_new:
-                            total_new += 1
-                            query_prospect_map[query_key].append(pid)
-                            logger.info("  NEW prospect: %s (%s)", p.get("full_name"), username)
-                    await db.commit()
+                        for p in results:
+                            username = (p.get("profile_username") or "").strip("/").split("/")[-1]
+                            if not username or len(username) < 2:
+                                logger.debug("  skipping result with no username: %s", p.get("full_name"))
+                                continue
+                            pid, is_new = await repo.upsert_by_username(username, {
+                                "full_name": p.get("full_name", ""),
+                                "headline": p.get("headline", ""),
+                                "location": p.get("location", ""),
+                                "linkedin_url": f"https://www.linkedin.com/in/{username}/",
+                                "linkedin_username": username,
+                                "source_search_id": cursor.lastrowid,
+                                "scraped_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                            })
+                            if is_new:
+                                total_new += 1
+                                query_prospect_map[query_key].append(pid)
+                                logger.info("  NEW prospect: %s (%s)", p.get("full_name"), username)
+                        await db.commit()
 
-                except DailyLimitReached as e:
-                    LOOP_STATE["status"] = "rate_limited"
-                    LOOP_STATE["current_step"] = "Rate limit LinkedIn atteint. Reprise demain."
-                    logger.warning("RATE LIMIT: %s", e)
-                    break
-                except Exception:
-                    logger.error("SCRAPE ERROR for '%s':", kw, exc_info=True)
+                    except DailyLimitReached as e:
+                        LOOP_STATE["status"] = "rate_limited"
+                        LOOP_STATE["current_step"] = "Rate limit LinkedIn atteint. Reprise demain."
+                        logger.warning("RATE LIMIT: %s", e)
+                        break
+                    except Exception:
+                        logger.error("SCRAPE ERROR for '%s':", kw, exc_info=True)
 
             # --- Step 4.5: Deep screening (fetch full profiles) ---
             LOOP_STATE["status"] = "evaluating"
