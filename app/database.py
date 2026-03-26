@@ -292,6 +292,22 @@ async def init_db() -> None:
             )
         """)
 
+        # --- Query performance tracking ---
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS query_performance (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                search_keywords TEXT NOT NULL,
+                search_location TEXT,
+                run_id INTEGER,
+                prospects_found INTEGER DEFAULT 0,
+                prospects_new INTEGER DEFAULT 0,
+                avg_score REAL DEFAULT 0.0,
+                best_score REAL DEFAULT 0.0,
+                qualified_count INTEGER DEFAULT 0,
+                created_at TEXT DEFAULT (datetime('now'))
+            )
+        """)
+
         # Seed default program if empty
         existing_program = await db.execute_fetchall(
             "SELECT id FROM prospect_program WHERE status = 'active' LIMIT 1"
@@ -305,6 +321,18 @@ async def init_db() -> None:
         # Migration: add score_summary column if missing
         try:
             await db.execute("ALTER TABLE prospects ADD COLUMN score_summary TEXT")
+        except Exception:
+            pass  # column already exists
+
+        # Migration: add claude_analysis column if missing
+        try:
+            await db.execute("ALTER TABLE prospects ADD COLUMN claude_analysis TEXT")
+        except Exception:
+            pass  # column already exists
+
+        # Migration: add company_info_json column for enriched company data
+        try:
+            await db.execute("ALTER TABLE prospects ADD COLUMN company_info_json TEXT")
         except Exception:
             pass  # column already exists
 

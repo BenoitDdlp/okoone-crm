@@ -30,142 +30,17 @@
     <div class="stat-label">Contactes</div>
   </div>
 </div>
+<p class="section-hint">Ces chiffres montrent l'etat de ton pipeline.</p>
 
 <!-- Review card area -->
+<h2 class="section-title-inline">Prochain prospect</h2>
+<p class="section-hint">
+  Qualifie ce prospect pour ton pipeline. Les barres montrent pourquoi il a ce
+  score.
+</p>
+
 <div id="review-area">
-  {% if prospect %}
-  <div class="review-card" id="current-card">
-    <div class="rc-top">
-      <div class="rc-avatar">{{ (prospect.full_name or 'N')[0] }}</div>
-      <div class="rc-info">
-        <h3>{{ prospect.full_name or 'Inconnu' }}</h3>
-        <div class="rc-headline">{{ prospect.headline or '' }}</div>
-        <div class="rc-meta">
-          {% if prospect.current_company %}<span
-            >{{ prospect.current_company }}</span
-          >{% endif %} {% if prospect.location %}<span
-            >{{ prospect.location }}</span
-          >{% endif %}
-        </div>
-      </div>
-    </div>
-
-    {% set score = prospect.relevance_score|default(0)|round|int %}
-    <div
-      class="rc-score {{ 'high' if score >= 70 else 'mid' if score >= 40 else 'low' }}"
-    >
-      {{ score }}
-    </div>
-
-    {% if experiences %}
-    <div class="rc-section">
-      <div class="rc-section-title">Experience</div>
-      {% for exp in experiences[:3] %}
-      <div class="rc-experience-item">
-        <strong>{{ exp.title|default('') }}</strong>
-        <span>@ {{ exp.company|default('') }}</span>
-        {% if exp.duration %}<span style="color: var(--muted)">
-          — {{ exp.duration }}</span
-        >{% endif %}
-      </div>
-      {% endfor %}
-    </div>
-    {% endif %} {% if prospect.about_text %}
-    <div class="rc-section">
-      <div class="rc-section-title">A propos</div>
-      <p style="font-size: 0.88rem; color: var(--text-secondary)">
-        {{ prospect.about_text[:250] }}{% if prospect.about_text|length > 250
-        %}...{% endif %}
-      </p>
-    </div>
-    {% endif %} {% if traits %}
-    <div class="rc-section">
-      <div class="rc-tags">
-        {% for t in traits %}<span class="rc-tag">{{ t }}</span>{% endfor %}
-      </div>
-    </div>
-    {% endif %} {% if score_breakdown %}
-    <div class="rc-section">
-      <div class="rc-section-title">Score</div>
-      {% for key, val in score_breakdown.items() %}
-      <div class="score-bar-container">
-        <div class="score-bar-label">
-          <span>{{ key }}</span>
-          <span>{{ (val * 100)|round|int }}%</span>
-        </div>
-        <div class="score-bar-track">
-          <div
-            class="score-bar-fill {{ 'high' if val >= 0.7 else 'mid' if val >= 0.4 else 'low' }}"
-            style="width: {{ (val * 100)|round|int }}%"
-          ></div>
-        </div>
-      </div>
-      {% endfor %}
-    </div>
-    {% endif %} {% if prospect.score_summary %}
-    <div class="rc-section">
-      <div class="rc-section-title">Pourquoi ce score</div>
-      {% for line in prospect.score_summary.split('\n') %} {% if
-      line.startswith('+') %}
-      <div style="color: var(--success); font-size: 0.85rem">{{ line }}</div>
-      {% elif line.startswith('-') %}
-      <div style="color: var(--error); font-size: 0.85rem">{{ line }}</div>
-      {% endif %} {% endfor %}
-    </div>
-    {% endif %} {% if prospect.linkedin_url %}
-    <a
-      href="{{ prospect.linkedin_url }}"
-      target="_blank"
-      rel="noopener"
-      style="font-size: 0.82rem; display: inline-block; margin-top: 0.5rem"
-      >Voir le profil LinkedIn &rarr;</a
-    >
-    {% endif %}
-  </div>
-
-  <!-- Review buttons -->
-  <div class="review-actions">
-    <button
-      class="review-btn reject"
-      hx-post="/api/v1/prospects/{{ prospect.id }}/review"
-      hx-vals='{"verdict": "reject"}'
-      hx-target="#review-area"
-      hx-swap="innerHTML"
-      data-toast="Prospect rejete"
-    >
-      <span>
-        <span class="btn-icon">&#10005;</span> Rejeter
-        <span class="btn-hint"><span class="kbd">&larr;</span></span>
-      </span>
-    </button>
-    <button
-      class="review-btn maybe"
-      hx-post="/api/v1/prospects/{{ prospect.id }}/review"
-      hx-vals='{"verdict": "flag"}'
-      hx-target="#review-area"
-      hx-swap="innerHTML"
-      data-toast="Prospect marque peut-etre"
-    >
-      <span>
-        <span class="btn-icon">&#63;</span> Peut-etre
-        <span class="btn-hint"><span class="kbd">&darr;</span></span>
-      </span>
-    </button>
-    <button
-      class="review-btn qualify"
-      hx-post="/api/v1/prospects/{{ prospect.id }}/review"
-      hx-vals='{"verdict": "approve"}'
-      hx-target="#review-area"
-      hx-swap="innerHTML"
-      data-toast="Prospect qualifie !"
-    >
-      <span>
-        <span class="btn-icon">&#10003;</span> Qualifier
-        <span class="btn-hint"><span class="kbd">&rarr;</span></span>
-      </span>
-    </button>
-  </div>
-  {% else %}
+  {% if prospect %} {% include "partials/review_card.html" %} {% else %}
   <div class="empty-state">
     <div class="empty-icon">&#10003;</div>
     <p>
@@ -179,17 +54,7 @@
 <!-- Recent decisions -->
 {% if recent_decisions %}
 <div class="decision-list" style="margin-top: 2rem">
-  <h3
-    style="
-      font-size: 0.82rem;
-      color: var(--muted);
-      margin-bottom: 0.5rem;
-      text-transform: uppercase;
-      letter-spacing: 0.06em;
-    "
-  >
-    Decisions recentes
-  </h3>
+  <h3 class="section-label">Decisions recentes</h3>
   {% for d in recent_decisions %}
   <div class="decision-item">
     <span
@@ -213,58 +78,55 @@
 
 <!-- Prospects table -->
 <div class="section-card" style="margin-top: 2rem">
-  <h2
-    style="
-      font-family: var(--font-accent);
-      font-size: 1.15rem;
-      font-weight: 500;
-      margin-bottom: 0.75rem;
-    "
-  >
-    Tous les prospects
-  </h2>
-  <table>
-    <thead>
-      <tr>
-        <th>Score</th>
-        <th>Nom</th>
-        <th>Titre</th>
-        <th>Entreprise</th>
-        <th>Location</th>
-        <th>Status</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for p in all_prospects %}
-      <tr
-        hx-get="/prospects/{{ p.id }}"
-        hx-target="#review-area"
-        hx-swap="innerHTML"
-        style="cursor: pointer"
-      >
-        <td>
-          {% set s = p.relevance_score|default(0)|round|int %}
-          <span
-            class="badge-score {{ 'high' if s >= 70 else 'mid' if s >= 40 else 'low' }}"
-            >{{ s }}</span
-          >
-        </td>
-        <td style="font-weight: 500; color: var(--text)">
-          {{ p.full_name or '?' }}
-        </td>
-        <td>{{ (p.headline or '')[:40] }}</td>
-        <td>{{ p.current_company or '' }}</td>
-        <td>{{ p.location or '' }}</td>
-        <td>
-          <span
-            class="pill {{ 'pill-success' if p.status == 'qualified' else 'pill-error' if p.status == 'rejected' else 'pill-warning' if p.status == 'screened' else 'pill-muted' }}"
-            >{{ p.status }}</span
-          >
-        </td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
+  <h2 class="section-card-title">Tous les prospects</h2>
+  <p class="section-desc">
+    Liste complete de tous les prospects. Clique pour voir le detail.
+  </p>
+  <div class="table-wrap">
+    <table class="prospect-table">
+      <thead>
+        <tr>
+          <th>Score</th>
+          <th>Nom</th>
+          <th>Titre</th>
+          <th>Entreprise</th>
+          <th>Location</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in all_prospects %}
+        <tr
+          hx-get="/prospects/{{ p.id }}"
+          hx-target="#review-area"
+          hx-swap="innerHTML"
+          class="prospect-row"
+        >
+          <td>
+            {% set s = p.relevance_score|default(0)|round|int %}
+            <span
+              class="badge-score {{ 'high' if s >= 70 else 'mid' if s >= 40 else 'low' }}"
+              >{{ s }}</span
+            >
+          </td>
+          <td class="td-name">{{ p.full_name or '?' }}</td>
+          <td class="td-headline">
+            {{ (p.headline or '')[:45] }}{% if (p.headline or '')|length > 45
+            %}...{% endif %}
+          </td>
+          <td class="td-company">{{ p.current_company or '—' }}</td>
+          <td class="td-location">{{ p.location or '—' }}</td>
+          <td>
+            <span
+              class="pill {{ 'pill-success' if p.status == 'qualified' else 'pill-error' if p.status == 'rejected' else 'pill-warning' if p.status == 'screened' else 'pill-muted' }}"
+              >{{ p.status }}</span
+            >
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
   {% if total_pages > 1 %}
   <div class="pagination">
     {% if page > 1 %}
@@ -273,6 +135,7 @@
       hx-target="main"
       hx-swap="innerHTML"
       hx-push-url="true"
+      class="btn btn-sm"
     >
       &larr; Precedent
     </button>
@@ -284,6 +147,7 @@
       hx-target="main"
       hx-swap="innerHTML"
       hx-push-url="true"
+      class="btn btn-sm"
     >
       Suivant &rarr;
     </button>

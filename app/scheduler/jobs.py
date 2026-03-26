@@ -1,10 +1,12 @@
 """Background research loop — runs continuously, Karpathy-style.
 
 Architecture: Claude = brain, Patchright = hands.
-- Claude generates search queries from the program
+- Claude generates search queries from the program (informed by past query performance)
 - Patchright scrapes LinkedIn
 - Claude evaluates prospects
-- Claude proposes program improvements
+- Metrics computed per cycle: qualification_rate, novelty_rate, diversity_score, avg_score
+- Claude proposes program improvements (with metrics trends from last 5 cycles)
+- Auto-accept if configured, otherwise pending human review
 - Failure detection: alerts when scraping yields 0 results
 """
 
@@ -89,9 +91,14 @@ async def run_research_loop() -> None:
 
             repo = ProspectRepository(db)
 
+            # Track which prospect IDs came from which query (for performance tracking)
+            query_prospect_map: dict[str, list[int]] = {}
+
             for i, q in enumerate(queries[:5]):
                 kw = q["keywords"]
                 loc = q.get("location")
+                query_key = f"{kw}||{loc or ''}"
+                query_prospect_map[query_key] = []
                 logger.info("SCRAPE [%d/%d] keywords='%s' location='%s'", i + 1, min(len(queries), 5), kw, loc)
                 LOOP_STATE["current_step"] = f"Recherche {i+1}/{min(len(queries), 5)}: {kw[:40]}..."
 
@@ -113,7 +120,7 @@ async def run_research_loop() -> None:
                         if not username or len(username) < 2:
                             logger.debug("  skipping result with no username: %s", p.get("full_name"))
                             continue
-                        _, is_new = await repo.upsert_by_username(username, {
+                        pid, is_new = await repo.upsert_by_username(username, {
                             "full_name": p.get("full_name", ""),
                             "headline": p.get("headline", ""),
                             "location": p.get("location", ""),
@@ -124,6 +131,7 @@ async def run_research_loop() -> None:
                         })
                         if is_new:
                             total_new += 1
+                            query_prospect_map[query_key].append(pid)
                             logger.info("  NEW prospect: %s (%s)", p.get("full_name"), username)
                     await db.commit()
 
@@ -224,34 +232,153 @@ async def run_research_loop() -> None:
                         scored += 1
                 await db.commit()
 
-            # --- Step 6: Claude proposes improvements ---
+            # --- Step 5.5: Claude deep analysis on enriched prospects ---
+            LOOP_STATE["status"] = "analyzing"
+            LOOP_STATE["current_step"] = "Claude analyse en profondeur les prospects enrichis..."
+            analyzed = 0
+            try:
+                from app.services.deep_analysis_service import DeepAnalysisService
+                from app.services.autoresearch_service import AutoresearchService as _AR
+
+                deep_svc = DeepAnalysisService()
+                _ar = _AR()
+                _prog_version, _prog_content = await _ar._load_program(db)
+                _acqs = await _ar._load_acquaintances(db)
+
+                # Prospects with experience data but no Claude analysis yet (max 5 per cycle)
+                da_cursor = await db.execute(
+                    "SELECT id FROM prospects "
+                    "WHERE experience_json IS NOT NULL AND experience_json != '' AND experience_json != '[]' "
+                    "AND (claude_analysis IS NULL OR claude_analysis = '') "
+                    "ORDER BY relevance_score DESC LIMIT 5"
+                )
+                da_ids = [row[0] for row in await da_cursor.fetchall()]
+
+                for i, pid in enumerate(da_ids):
+                    LOOP_STATE["current_step"] = f"Analyse Claude {i+1}/{len(da_ids)}..."
+                    prospect = await repo.find_by_id(pid)
+                    if not prospect:
+                        continue
+                    try:
+                        analysis = await deep_svc.analyze_prospect(prospect, _prog_content, _acqs)
+                        await repo.update(pid, {"claude_analysis": json.dumps(analysis, ensure_ascii=False)})
+                        analyzed += 1
+                        logger.info(
+                            "DEEP ANALYSIS [%d] %s → verdict=%s score=%s",
+                            pid, prospect.get("full_name", "?"),
+                            analysis.get("verdict"), analysis.get("score"),
+                        )
+                    except Exception:
+                        logger.error("DEEP ANALYSIS ERROR for prospect %d:", pid, exc_info=True)
+                await db.commit()
+            except Exception:
+                logger.error("DEEP ANALYSIS step failed:", exc_info=True)
+            logger.info("DEEP ANALYSIS complete: %d prospects analyzed", analyzed)
+
+            # --- Step 6: Compute cycle metrics ---
+            LOOP_STATE["current_step"] = "Calcul des metriques du cycle..."
+
+            all_new_ids: list[int] = []
+            for ids in query_prospect_map.values():
+                all_new_ids.extend(ids)
+
+            # Build evaluations list from scored prospects for metrics
+            evaluations: list[dict] = []
+            if all_new_ids:
+                placeholders = ",".join("?" * len(all_new_ids))
+                eval_cursor = await db.execute(
+                    f"SELECT id, relevance_score FROM prospects WHERE id IN ({placeholders})",
+                    all_new_ids,
+                )
+                for row in await eval_cursor.fetchall():
+                    score_val = row[1] or 0
+                    evaluations.append({
+                        "prospect_id": row[0],
+                        "score": score_val,
+                        "verdict": "qualified" if score_val > 50 else "maybe" if score_val > 30 else "reject",
+                    })
+
+            metrics = await research.compute_cycle_metrics(db, all_new_ids, evaluations)
+            logger.info(
+                "CYCLE METRICS: qual=%.1f%% novelty=%.1f%% diversity=%d avg=%.1f found=%d qualified=%d",
+                metrics["qualification_rate"], metrics["novelty_rate"],
+                metrics["diversity_score"], metrics["avg_score"],
+                metrics["total_found"], metrics["total_qualified"],
+            )
+
+            # --- Step 6.5: Record run + query performance ---
+            v_cursor = await db.execute(
+                "SELECT version FROM prospect_program WHERE status = 'active' ORDER BY version DESC LIMIT 1"
+            )
+            v = await v_cursor.fetchone()
+            program_version = v[0] if v else 0
+
+            await db.execute("""
+                INSERT INTO research_runs
+                    (program_version, finished_at, status, prospects_found, prospects_qualified,
+                     metric_json)
+                VALUES (?, datetime('now'), ?, ?, ?, ?)
+            """, (
+                program_version,
+                "completed" if total_new > 0 else "no_results",
+                total_new,
+                scored,
+                json.dumps(metrics),
+            ))
+            await db.commit()
+
+            run_id_cursor = await db.execute("SELECT last_insert_rowid()")
+            run_id_row = await run_id_cursor.fetchone()
+            current_run_id = run_id_row[0] if run_id_row else 0
+
+            # Record per-query performance
+            for query_key, prospect_ids in query_prospect_map.items():
+                parts = query_key.split("||", 1)
+                kw = parts[0]
+                loc = parts[1] if len(parts) > 1 and parts[1] else None
+                try:
+                    await research.record_query_performance(db, kw, loc, current_run_id, prospect_ids)
+                except Exception:
+                    logger.error("Failed to record query performance for '%s':", kw, exc_info=True)
+            await db.commit()
+
+            # --- Step 7: Claude proposes improvements ---
             LOOP_STATE["status"] = "proposing"
-            LOOP_STATE["current_step"] = "Claude analyse et propose des ameliorations..."
+            LOOP_STATE["current_step"] = "Claude analyse les metriques et propose des ameliorations..."
             try:
                 proposal = await research.propose_program_improvement(db)
             except Exception as e:
                 logger.warning("Program improvement proposal failed: %s", str(e)[:100])
                 proposal = {}
 
-            # --- Step 7: Record run ---
-            v_cursor = await db.execute(
-                "SELECT version FROM prospect_program WHERE status = 'active' ORDER BY version DESC LIMIT 1"
-            )
-            v = await v_cursor.fetchone()
-            await db.execute("""
-                INSERT INTO research_runs
-                    (program_version, finished_at, status, prospects_found, prospects_qualified,
-                     proposed_program, proposal_reasoning)
-                VALUES (?, datetime('now'), ?, ?, ?, ?, ?)
-            """, (
-                v[0] if v else 0,
-                "completed" if total_new > 0 else "no_results",
-                total_new,
-                scored,
-                proposal.get("proposed_program", ""),
-                (proposal.get("analysis") or "")[:2000],
-            ))
-            await db.commit()
+            # Update run record with proposal
+            if proposal:
+                await db.execute("""
+                    UPDATE research_runs SET
+                        proposed_program = ?,
+                        proposal_reasoning = ?
+                    WHERE id = ?
+                """, (
+                    proposal.get("proposed_program", ""),
+                    (proposal.get("analysis") or "")[:2000],
+                    current_run_id,
+                ))
+                await db.commit()
+
+            # --- Step 7.5: Auto-accept improvements if configured ---
+            if settings.AUTO_ACCEPT_IMPROVEMENTS and proposal.get("proposed_program"):
+                try:
+                    new_version = await research.apply_program(
+                        db, proposal["proposed_program"], author="claude-auto"
+                    )
+                    await db.execute(
+                        "UPDATE research_runs SET proposal_status = 'auto-accepted' WHERE id = ?",
+                        (current_run_id,),
+                    )
+                    await db.commit()
+                    logger.info("AUTO-ACCEPTED program v%d from run %d", new_version, current_run_id)
+                except Exception:
+                    logger.error("Failed to auto-accept program improvement:", exc_info=True)
 
         # --- Step 8: Update state + failure detection ---
         LOOP_STATE["status"] = "sleeping"
@@ -272,13 +399,20 @@ async def run_research_loop() -> None:
                 LOOP_STATE["current_step"] = f"Cycle termine. 0 nouveaux prospects (#{LOOP_STATE['consecutive_empty_runs']} consecutif)."
         else:
             LOOP_STATE["consecutive_empty_runs"] = 0
-            LOOP_STATE["current_step"] = f"Cycle termine. +{total_new} prospects, {scored} scores. Prochain cycle en attente."
+            LOOP_STATE["current_step"] = (
+                f"Cycle termine. +{total_new} prospects, {scored} scores. "
+                f"Metriques: qual={metrics['qualification_rate']:.0f}% "
+                f"novelty={metrics['novelty_rate']:.0f}% "
+                f"diversity={metrics['diversity_score']} "
+                f"avg={metrics['avg_score']:.0f}"
+            )
 
         LOOP_STATE["last_run_result"] = {
             "queries": min(len(queries), 5),
             "found": total_found,
             "new": total_new,
             "scored": scored,
+            "metrics": metrics,
         }
 
     except Exception as e:

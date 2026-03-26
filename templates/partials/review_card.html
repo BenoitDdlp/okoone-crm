@@ -1,89 +1,167 @@
-<div class="review-card" id="current-card">
-  <div class="rc-top">
-    <div class="rc-avatar">{{ (prospect.full_name or 'N')[0] }}</div>
-    <div class="rc-info">
-      <h3>{{ prospect.full_name or 'Inconnu' }}</h3>
-      <div class="rc-headline">{{ prospect.headline or '' }}</div>
-      <div class="rc-meta">
-        {% if prospect.current_company %}<span
-          >{{ prospect.current_company }}</span
-        >{% endif %} {% if prospect.location %}<span
-          >{{ prospect.location }}</span
-        >{% endif %}
-      </div>
-    </div>
-  </div>
-
+<div
+  class="review-card {{ 'review-card--glow' if (prospect.relevance_score|default(0)|round|int) >= 70 }}"
+  id="current-card"
+>
   {% set score = prospect.relevance_score|default(0)|round|int %}
-  <div
-    class="rc-score {{ 'high' if score >= 70 else 'mid' if score >= 40 else 'low' }}"
-  >
-    {{ score }}
+
+  <!-- Header: avatar + identity + score badge -->
+  <div class="rc-header">
+    <div class="rc-identity">
+      <div class="rc-avatar">{{ (prospect.full_name or 'N')[0] }}</div>
+      <div class="rc-identity-text">
+        <h3 class="rc-name">{{ prospect.full_name or 'Inconnu' }}</h3>
+        {% if prospect.headline %}
+        <div class="rc-headline">{{ prospect.headline }}</div>
+        {% endif %}
+        <div class="rc-meta">
+          {% if prospect.current_company %}
+          <span class="rc-meta-item">
+            <span class="rc-meta-icon">&#9670;</span> {{
+            prospect.current_company }}
+          </span>
+          {% endif %} {% if prospect.location %}
+          <span class="rc-meta-item">
+            <span class="rc-meta-icon">&#9906;</span> {{ prospect.location }}
+          </span>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+    <div
+      class="rc-score-badge {{ 'high' if score >= 70 else 'mid' if score >= 40 else 'low' }}"
+    >
+      <span class="rc-score-num">{{ score }}</span>
+      <span class="rc-score-label">score</span>
+    </div>
   </div>
 
-  {% if experiences %}
-  <div class="rc-section">
-    <div class="rc-section-title">Experience</div>
-    {% for exp in experiences[:3] %}
-    <div class="rc-experience-item">
-      <strong>{{ exp.title|default('') }}</strong>
-      <span>@ {{ exp.company|default('') }}</span>
-      {% if exp.duration %}<span style="color: var(--muted)">
-        — {{ exp.duration }}</span
-      >{% endif %}
-    </div>
-    {% endfor %}
+  <!-- Tags -->
+  {% if traits %}
+  <div class="rc-tags">
+    {% for t in traits %}<span class="rc-tag">{{ t }}</span>{% endfor %}
   </div>
-  {% endif %} {% if prospect.about_text %}
-  <div class="rc-section">
-    <div class="rc-section-title">A propos</div>
-    <p style="font-size: 0.88rem; color: var(--text-secondary)">
-      {{ prospect.about_text[:250] }}{% if prospect.about_text|length > 250
-      %}...{% endif %}
-    </p>
-  </div>
-  {% endif %} {% if traits %}
-  <div class="rc-section">
-    <div class="rc-tags">
-      {% for t in traits %}<span class="rc-tag">{{ t }}</span>{% endfor %}
-    </div>
-  </div>
-  {% endif %} {% if score_breakdown %}
-  <div class="rc-section">
-    <div class="rc-section-title">Score</div>
-    {% for key, val in score_breakdown.items() %}
-    <div class="score-bar-container">
-      <div class="score-bar-label">
-        <span>{{ key }}</span>
-        <span>{{ (val * 100)|round|int }}%</span>
+  {% endif %}
+
+  <!-- Two-column body -->
+  <div class="rc-body">
+    <!-- Left column: profile details -->
+    <div class="rc-col-left">
+      {% if experiences %}
+      <div class="rc-section">
+        <div class="rc-section-title">
+          <span class="rc-section-icon">&#9733;</span> Experience
+        </div>
+        <div class="rc-timeline">
+          {% for exp in experiences[:3] %}
+          <div class="rc-timeline-item">
+            <div class="rc-timeline-dot"></div>
+            <div class="rc-timeline-content">
+              <div class="rc-timeline-title">{{ exp.title|default('') }}</div>
+              <div class="rc-timeline-company">
+                {{ exp.company|default('') }}
+              </div>
+              {% if exp.duration %}
+              <div class="rc-timeline-duration">{{ exp.duration }}</div>
+              {% endif %}
+            </div>
+          </div>
+          {% endfor %}
+        </div>
       </div>
-      <div class="score-bar-track">
-        <div
-          class="score-bar-fill {{ 'high' if val >= 0.7 else 'mid' if val >= 0.4 else 'low' }}"
-          style="width: {{ (val * 100)|round|int }}%"
-        ></div>
+      {% endif %} {% if education %}
+      <div class="rc-section">
+        <div class="rc-section-title">
+          <span class="rc-section-icon">&#9734;</span> Formation
+        </div>
+        {% for edu in education[:2] %}
+        <div class="rc-edu-item">
+          <div class="rc-edu-school">
+            {{ edu.school|default(edu.institution|default('')) }}
+          </div>
+          {% if edu.degree or edu.field_of_study %}
+          <div class="rc-edu-degree">
+            {{ edu.degree|default('') }}{% if edu.field_of_study %} — {{
+            edu.field_of_study }}{% endif %}
+          </div>
+          {% endif %}
+        </div>
+        {% endfor %}
       </div>
+      {% endif %} {% if prospect.about_text %}
+      <div class="rc-section">
+        <div class="rc-section-title">
+          <span class="rc-section-icon">&#9998;</span> A propos
+        </div>
+        <p class="rc-about">
+          {{ prospect.about_text[:300] }}{% if prospect.about_text|length > 300
+          %}...{% endif %}
+        </p>
+      </div>
+      {% endif %}
     </div>
-    {% endfor %}
+
+    <!-- Right column: scoring -->
+    <div class="rc-col-right">
+      {% if score_breakdown %}
+      <div class="rc-section">
+        <div class="rc-section-title">
+          <span class="rc-section-icon">&#9776;</span> Score
+        </div>
+        {% for key, val in score_breakdown.items() %} {% set pct = (val *
+        100)|round|int %}
+        <div class="score-bar-container">
+          <div class="score-bar-label">
+            <span class="score-bar-name"
+              >{{ key|replace('_', ' ')|title }}</span
+            >
+            <span
+              class="score-bar-pct {{ 'high' if pct >= 70 else 'mid' if pct >= 40 else 'low' }}"
+              >{{ pct }}%</span
+            >
+          </div>
+          <div class="score-bar-track">
+            <div
+              class="score-bar-fill {{ 'high' if pct >= 70 else 'mid' if pct >= 40 else 'low' }}"
+              style="width: {{ pct }}%"
+            ></div>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %} {% if prospect.score_summary %}
+      <div class="rc-section">
+        <div class="rc-section-title">
+          <span class="rc-section-icon">&#9878;</span> Pourquoi ce score
+        </div>
+        <div class="rc-pros-cons">
+          {% for line in prospect.score_summary.split('\n') %} {% if
+          line.strip().startswith('+') %}
+          <div class="rc-pro">
+            <span class="rc-pro-icon">+</span> {{ line.strip()[1:]|trim }}
+          </div>
+          {% elif line.strip().startswith('-') %}
+          <div class="rc-con">
+            <span class="rc-con-icon">&minus;</span> {{ line.strip()[1:]|trim }}
+          </div>
+          {% endif %} {% endfor %}
+        </div>
+      </div>
+      {% endif %}
+    </div>
   </div>
-  {% endif %} {% if prospect.score_summary %}
-  <div class="rc-section">
-    <div class="rc-section-title">Pourquoi ce score</div>
-    {% for line in prospect.score_summary.split('\n') %} {% if
-    line.startswith('+') %}
-    <div style="color: var(--success); font-size: 0.85rem">{{ line }}</div>
-    {% elif line.startswith('-') %}
-    <div style="color: var(--error); font-size: 0.85rem">{{ line }}</div>
-    {% endif %} {% endfor %}
+
+  <!-- Footer: LinkedIn link -->
+  {% if prospect.linkedin_url %}
+  <div class="rc-footer">
+    <a
+      href="{{ prospect.linkedin_url }}"
+      target="_blank"
+      rel="noopener"
+      class="rc-linkedin-link"
+    >
+      <span class="rc-linkedin-icon">in</span> Voir le profil LinkedIn &rarr;
+    </a>
   </div>
-  {% endif %} {% if prospect.linkedin_url %}
-  <a
-    href="{{ prospect.linkedin_url }}"
-    target="_blank"
-    rel="noopener"
-    style="font-size: 0.82rem; display: inline-block; margin-top: 0.5rem"
-    >Voir sur LinkedIn &rarr;</a
-  >
   {% endif %}
 </div>
 
@@ -96,12 +174,10 @@
     hx-swap="innerHTML"
     data-toast="Prospect rejete"
   >
-    <span
-      ><span class="btn-icon">&#10005;</span> Rejeter<br /><span
-        class="btn-hint"
-        ><span class="kbd">&larr;</span></span
-      ></span
-    >
+    <span>
+      <span class="btn-icon">&#10005;</span> Rejeter<br />
+      <span class="btn-hint"><span class="kbd">&larr;</span></span>
+    </span>
   </button>
   <button
     class="review-btn maybe"
@@ -111,11 +187,10 @@
     hx-swap="innerHTML"
     data-toast="Marque peut-etre"
   >
-    <span
-      ><span class="btn-icon">&#63;</span> Peut-etre<br /><span class="btn-hint"
-        ><span class="kbd">&darr;</span></span
-      ></span
-    >
+    <span>
+      <span class="btn-icon">&#63;</span> Peut-etre<br />
+      <span class="btn-hint"><span class="kbd">&darr;</span></span>
+    </span>
   </button>
   <button
     class="review-btn qualify"
@@ -125,11 +200,9 @@
     hx-swap="innerHTML"
     data-toast="Prospect qualifie !"
   >
-    <span
-      ><span class="btn-icon">&#10003;</span> Qualifier<br /><span
-        class="btn-hint"
-        ><span class="kbd">&rarr;</span></span
-      ></span
-    >
+    <span>
+      <span class="btn-icon">&#10003;</span> Qualifier<br />
+      <span class="btn-hint"><span class="kbd">&rarr;</span></span>
+    </span>
   </button>
 </div>

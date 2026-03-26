@@ -47,12 +47,18 @@ async def pipeline(request: Request, page: int = 1):
         prospect = dict(row) if row else None
 
         experiences = []
+        education = []
         traits = []
         score_breakdown: Optional[dict] = None
         if prospect:
             if prospect.get("experience_json"):
                 try:
                     experiences = json.loads(prospect["experience_json"])
+                except (json.JSONDecodeError, TypeError):
+                    pass
+            if prospect.get("education_json"):
+                try:
+                    education = json.loads(prospect["education_json"])
                 except (json.JSONDecodeError, TypeError):
                     pass
             if prospect.get("traits_json"):
@@ -95,6 +101,7 @@ async def pipeline(request: Request, page: int = 1):
             "stats": stats,
             "prospect": prospect,
             "experiences": experiences,
+            "education": education,
             "traits": traits,
             "score_breakdown": score_breakdown,
             "recent_decisions": recent_decisions,

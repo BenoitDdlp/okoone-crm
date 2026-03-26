@@ -29,6 +29,8 @@ class Settings(BaseSettings):
     LEARNING_REVIEW_THRESHOLD: int = 20
     SCRAPE_INTERVAL_MINUTES: int = 60
 
+    AUTO_ACCEPT_IMPROVEMENTS: bool = False
+
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 
 

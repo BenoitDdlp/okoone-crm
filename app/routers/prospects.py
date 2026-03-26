@@ -84,6 +84,102 @@ async def get_prospect(prospect_id: int):
     return prospect
 
 
+@router.get("/{prospect_id}/analysis")
+async def get_prospect_analysis(prospect_id: int):
+    """Return the Claude deep analysis for a prospect.
+
+    If no analysis exists yet, triggers one on-the-fly (takes ~30s).
+    """
+    async with get_db() as db:
+        repo = ProspectRepository(db)
+        prospect = await repo.find_by_id(prospect_id)
+        if not prospect:
+            raise HTTPException(status_code=404, detail="Prospect introuvable")
+
+        # Return cached analysis if available
+        if prospect.get("claude_analysis"):
+            try:
+                return json.loads(prospect["claude_analysis"])
+            except (json.JSONDecodeError, TypeError):
+                return {"raw": prospect["claude_analysis"]}
+
+        # No cached analysis — generate one on-the-fly
+        has_experience = (
+            prospect.get("experience_json")
+            and prospect["experience_json"] not in ("", "[]")
+        )
+        if not has_experience:
+            raise HTTPException(
+                status_code=422,
+                detail="Prospect sans donnees d'experience. Lance un deep screen d'abord.",
+            )
+
+        from app.services.deep_analysis_service import DeepAnalysisService
+        from app.services.autoresearch_service import AutoresearchService
+
+        deep_svc = DeepAnalysisService()
+        ar_svc = AutoresearchService()
+        _version, program_content = await ar_svc._load_program(db)
+        acquaintances = await ar_svc._load_acquaintances(db)
+
+        try:
+            analysis = await deep_svc.analyze_prospect(prospect, program_content, acquaintances)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Erreur Claude CLI: {str(exc)[:200]}",
+            )
+
+        # Persist for future calls
+        await repo.update(prospect_id, {
+            "claude_analysis": json.dumps(analysis, ensure_ascii=False),
+        })
+
+        return analysis
+
+
+@router.post("/{prospect_id}/analysis/refresh")
+async def refresh_prospect_analysis(prospect_id: int):
+    """Force a fresh Claude analysis for a prospect, overwriting any cached one."""
+    async with get_db() as db:
+        repo = ProspectRepository(db)
+        prospect = await repo.find_by_id(prospect_id)
+        if not prospect:
+            raise HTTPException(status_code=404, detail="Prospect introuvable")
+
+        has_experience = (
+            prospect.get("experience_json")
+            and prospect["experience_json"] not in ("", "[]")
+        )
+        if not has_experience:
+            raise HTTPException(
+                status_code=422,
+                detail="Prospect sans donnees d'experience. Lance un deep screen d'abord.",
+            )
+
+        from app.services.deep_analysis_service import DeepAnalysisService
+        from app.services.autoresearch_service import AutoresearchService
+
+        deep_svc = DeepAnalysisService()
+        ar_svc = AutoresearchService()
+        _version, program_content = await ar_svc._load_program(db)
+        acquaintances = await ar_svc._load_acquaintances(db)
+
+        try:
+            analysis = await deep_svc.analyze_prospect(prospect, program_content, acquaintances)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Erreur Claude CLI: {str(exc)[:200]}",
+            )
+
+        await repo.update(prospect_id, {
+            "claude_analysis": json.dumps(analysis, ensure_ascii=False),
+        })
+
+        return analysis
+
+
 @router.patch("/{prospect_id}")
 async def update_prospect(prospect_id: int, data: ProspectUpdate):
     """Update prospect fields."""
@@ -165,11 +261,17 @@ async def review_prospect(
         if next_row:
             next_p = dict(next_row)
             experiences = []
+            education = []
             traits = []
             score_breakdown = {}
             if next_p.get("experience_json"):
                 try:
                     experiences = json.loads(next_p["experience_json"])
+                except (json.JSONDecodeError, TypeError):
+                    pass
+            if next_p.get("education_json"):
+                try:
+                    education = json.loads(next_p["education_json"])
                 except (json.JSONDecodeError, TypeError):
                     pass
             if next_p.get("traits_json"):
@@ -186,7 +288,7 @@ async def review_prospect(
             return HTMLResponse(
                 templates.env.get_template("partials/review_card.html").render(
                     {"request": request, "prospect": next_p, "experiences": experiences,
-                     "traits": traits, "score_breakdown": score_breakdown}
+                     "education": education, "traits": traits, "score_breakdown": score_breakdown}
                 )
             )
         else:

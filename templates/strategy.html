@@ -1,12 +1,11 @@
-{% extends "base.html" %}
-{% block title %}Strategie — Okoone CRM{% endblock %}
-
+{% extends "base.html" %} {% block title %}Strategie — Okoone CRM{% endblock %}
 {% block content %}
 <div class="page-header">
   <h1>Strategie</h1>
   <p class="page-desc">
-    Cette page controle comment Claude cherche et evalue les prospects.
-    Tu edites la strategie, Claude l'execute en boucle, et te propose des ameliorations.
+    Cette page controle comment Claude cherche et evalue les prospects. Tu
+    edites la strategie, Claude l'execute en boucle, et te propose des
+    ameliorations.
   </p>
 </div>
 
@@ -15,10 +14,13 @@
      This is the "always running" part — shows if the background
      loop is active and what it's doing right now.
      ============================================================ -->
-<div class="section-card" id="loop-section"
-     hx-get="/api/v1/strategy/loop-status"
-     hx-trigger="every 5s"
-     hx-swap="innerHTML">
+<div
+  class="section-card"
+  id="loop-section"
+  hx-get="/api/v1/strategy/loop-status"
+  hx-trigger="every 5s"
+  hx-swap="innerHTML"
+>
   {% include "partials/loop_status.html" %}
 </div>
 
@@ -28,52 +30,83 @@
      search cycle. It defines WHO to look for, WHERE, and WHY.
      ============================================================ -->
 <div class="section-card">
-  <h2>Le Programme <span class="pill pill-info">v{{ program_version }}</span></h2>
+  <h2>
+    Le Programme <span class="pill pill-info">v{{ program_version }}</span>
+  </h2>
   <p class="section-desc">
-    C'est le document que Claude lit avant chaque cycle de recherche.
-    Il definit qui chercher, ou, et comment evaluer les resultats.
-    Ecris en langage naturel — Claude comprend le contexte.
+    C'est le document que Claude lit avant chaque cycle de recherche. Il definit
+    qui chercher, ou, et comment evaluer les resultats. Ecris en langage naturel
+    — Claude comprend le contexte.
   </p>
 
-  <form class="program-editor"
-        hx-put="/api/v1/strategy/program"
-        hx-swap="none"
-        data-toast="Programme sauvegarde">
+  <form
+    class="program-editor"
+    hx-put="/api/v1/strategy/program"
+    hx-swap="none"
+    data-toast="Programme sauvegarde"
+  >
     <textarea name="content" rows="20">{{ program_content }}</textarea>
-    <div style="display:flex;gap:0.75rem;margin-top:0.75rem;align-items:center;">
+    <div
+      style="
+        display: flex;
+        gap: 0.75rem;
+        margin-top: 0.75rem;
+        align-items: center;
+      "
+    >
       <button type="submit" class="btn-primary">Sauvegarder</button>
-      <button type="button"
-              hx-post="/api/v1/strategy/propose"
-              hx-target="#proposal-area"
-              hx-swap="innerHTML"
-              hx-indicator="#propose-spinner"
-              data-toast="Claude analyse...">
+      <button
+        type="button"
+        hx-post="/api/v1/strategy/propose"
+        hx-target="#proposal-area"
+        hx-swap="innerHTML"
+        hx-indicator="#propose-spinner"
+        data-toast="Claude analyse..."
+      >
         Demander a Claude d'ameliorer
       </button>
-      <span id="propose-spinner" class="htmx-indicator" style="color:var(--muted);font-size:0.85rem;">Claude reflechit...</span>
+      <span
+        id="propose-spinner"
+        class="htmx-indicator"
+        style="color: var(--muted); font-size: 0.85rem"
+        >Claude reflechit...</span
+      >
     </div>
   </form>
 
-  <div id="proposal-area" style="margin-top:1rem;"></div>
+  <div id="proposal-area" style="margin-top: 1rem"></div>
 
   {% if versions|length > 1 %}
-  <details style="margin-top:1.5rem;">
-    <summary style="cursor:pointer;font-size:0.85rem;color:var(--muted);">Historique des versions ({{ versions|length }})</summary>
-    <table style="margin-top:0.5rem;">
-      <thead><tr><th>Version</th><th>Auteur</th><th>Date</th><th></th></tr></thead>
+  <details style="margin-top: 1.5rem">
+    <summary style="cursor: pointer; font-size: 0.85rem; color: var(--muted)">
+      Historique des versions ({{ versions|length }})
+    </summary>
+    <table style="margin-top: 0.5rem">
+      <thead>
+        <tr>
+          <th>Version</th>
+          <th>Auteur</th>
+          <th>Date</th>
+          <th></th>
+        </tr>
+      </thead>
       <tbody>
         {% for v in versions %}
         <tr>
           <td>v{{ v.version }}</td>
           <td>{{ v.author }}</td>
-          <td style="color:var(--muted);">{{ v.created_at }}</td>
+          <td style="color: var(--muted)">{{ v.created_at }}</td>
           <td>
             {% if v.status != 'active' %}
-            <button class="btn-sm btn-ghost"
-                    hx-post="/api/v1/strategy/restore/{{ v.version }}"
-                    hx-swap="none"
-                    hx-confirm="Restaurer v{{ v.version }} ?"
-                    data-toast="Version restauree">Restaurer</button>
+            <button
+              class="btn-sm btn-ghost"
+              hx-post="/api/v1/strategy/restore/{{ v.version }}"
+              hx-swap="none"
+              hx-confirm="Restaurer v{{ v.version }} ?"
+              data-toast="Version restauree"
+            >
+              Restaurer
+            </button>
             {% else %}
             <span class="pill pill-success">actif</span>
             {% endif %}
@@ -99,17 +132,28 @@
     Plus tu en ajoutes, plus Claude est precis.
   </p>
 
-  <form hx-post="/api/v1/strategy/acquaintances"
-        hx-target="#acq-list"
-        hx-swap="beforeend"
-        data-toast="Profil ajoute"
-        style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem;margin-bottom:1rem;">
-    <input type="text" name="full_name" placeholder="Nom complet" required>
-    <input type="text" name="headline" placeholder="Titre (ex: CTO at Startup)">
-    <input type="text" name="company" placeholder="Entreprise">
-    <input type="text" name="linkedin_url" placeholder="URL LinkedIn">
-    <div style="display:flex;gap:0.5rem;grid-column:span 2;">
-      <select name="relationship" style="flex:1;">
+  <form
+    hx-post="/api/v1/strategy/acquaintances"
+    hx-target="#acq-list"
+    hx-swap="beforeend"
+    data-toast="Profil ajoute"
+    style="
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.5rem;
+      margin-bottom: 1rem;
+    "
+  >
+    <input type="text" name="full_name" placeholder="Nom complet" required />
+    <input
+      type="text"
+      name="headline"
+      placeholder="Titre (ex: CTO at Startup)"
+    />
+    <input type="text" name="company" placeholder="Entreprise" />
+    <input type="text" name="linkedin_url" placeholder="URL LinkedIn" />
+    <div style="display: flex; gap: 0.5rem; grid-column: span 2">
+      <select name="relationship" style="flex: 1">
         <option value="prospect ideal">Prospect ideal (a chercher)</option>
         <option value="client existant">Client existant (similaire)</option>
         <option value="partenaire">Partenaire (reseau)</option>
@@ -120,61 +164,121 @@
   </form>
 
   <div id="acq-list">
-    {% if acquaintances %}
-    {% for a in acquaintances %}
+    {% if acquaintances %} {% for a in acquaintances %}
     <div class="acq-item">
       <div>
         <strong>{{ a.full_name }}</strong>
-        {% if a.headline %}<span style="color:var(--text-secondary);"> — {{ a.headline }}</span>{% endif %}
-        {% if a.company %}<span style="color:var(--muted);"> @ {{ a.company }}</span>{% endif %}
-        <span class="pill {{ 'pill-error' if a.relationship == 'concurrent' else 'pill-success' if a.relationship == 'prospect ideal' else 'pill-info' }}">{{ a.relationship }}</span>
+        {% if a.headline %}<span style="color: var(--text-secondary)">
+          — {{ a.headline }}</span
+        >{% endif %} {% if a.company %}<span style="color: var(--muted)">
+          @ {{ a.company }}</span
+        >{% endif %}
+        <span
+          class="pill {{ 'pill-error' if a.relationship == 'concurrent' else 'pill-success' if a.relationship == 'prospect ideal' else 'pill-info' }}"
+          >{{ a.relationship }}</span
+        >
       </div>
-      <button class="btn-sm btn-ghost"
-              hx-delete="/api/v1/strategy/acquaintances/{{ a.id }}"
-              hx-target="closest .acq-item"
-              hx-swap="outerHTML"
-              data-toast="Profil supprime">&#10005;</button>
+      <button
+        class="btn-sm btn-ghost"
+        hx-delete="/api/v1/strategy/acquaintances/{{ a.id }}"
+        hx-target="closest .acq-item"
+        hx-swap="outerHTML"
+        data-toast="Profil supprime"
+      >
+        &#10005;
+      </button>
     </div>
-    {% endfor %}
-    {% else %}
-    <p style="color:var(--muted);font-size:0.88rem;">Aucun profil de reference. Ajoute quelques exemples pour que Claude sache quoi chercher.</p>
+    {% endfor %} {% else %}
+    <p style="color: var(--muted); font-size: 0.88rem">
+      Aucun profil de reference. Ajoute quelques exemples pour que Claude sache
+      quoi chercher.
+    </p>
     {% endif %}
   </div>
 </div>
 
 <!-- ============================================================
-     SECTION 4: RUN HISTORY
+     SECTION 4: METRICS TREND (Karpathy loop intelligence)
+     Shows how the pipeline improves over cycles.
+     ============================================================ -->
+<div class="section-card">
+  <h2>
+    Metriques du pipeline {% if auto_accept %}<span
+      class="pill pill-warning"
+      style="font-size: 0.7rem"
+      >auto-accept ON</span
+    >{% endif %}
+  </h2>
+  <p class="section-desc">
+    Qualification rate, novelty, diversite et score moyen par cycle. Ces
+    metriques alimentent les propositions d'amelioration de Claude.
+  </p>
+
+  <div
+    id="metrics-panel"
+    hx-get="/api/v1/strategy/metrics-panel"
+    hx-trigger="load, every 30s"
+    hx-swap="innerHTML"
+  >
+    <p style="color: var(--muted); font-size: 0.88rem">
+      Chargement des metriques...
+    </p>
+  </div>
+</div>
+
+<!-- ============================================================
+     SECTION 5: RUN HISTORY
      Shows what happened in each research cycle.
      ============================================================ -->
 <div class="section-card">
   <h2>Historique des cycles</h2>
   <p class="section-desc">
-    Chaque ligne est un cycle complet: Claude cherche, evalue, et propose.
-    Si Claude a propose une amelioration du programme, tu peux l'accepter ici.
+    Chaque ligne est un cycle complet: Claude cherche, evalue, et propose. Si
+    Claude a propose une amelioration du programme, tu peux l'accepter ici.
   </p>
 
   {% if runs %}
   <table>
-    <thead><tr><th>Date</th><th>Programme</th><th>Trouves</th><th>Qualifies</th><th>Status</th><th>Proposition</th></tr></thead>
+    <thead>
+      <tr>
+        <th>Date</th>
+        <th>Programme</th>
+        <th>Trouves</th>
+        <th>Qualifies</th>
+        <th>Status</th>
+        <th>Proposition</th>
+      </tr>
+    </thead>
     <tbody>
       {% for r in runs %}
       <tr>
-        <td style="color:var(--text);">{{ r.started_at }}</td>
+        <td style="color: var(--text)">{{ r.started_at }}</td>
         <td>v{{ r.program_version }}</td>
         <td>{{ r.prospects_found }}</td>
-        <td style="color:var(--success);">{{ r.prospects_qualified }}</td>
-        <td><span class="pill {{ 'pill-success' if r.status == 'completed' else 'pill-error' if r.status == 'failed' else 'pill-warning' }}">{{ r.status }}</span></td>
+        <td style="color: var(--success)">{{ r.prospects_qualified }}</td>
+        <td>
+          <span
+            class="pill {{ 'pill-success' if r.status == 'completed' else 'pill-error' if r.status == 'failed' else 'pill-warning' }}"
+            >{{ r.status }}</span
+          >
+        </td>
         <td>
           {% if r.proposed_program and r.proposal_status == 'pending' %}
-          <button class="btn-sm btn-primary"
-                  hx-post="/api/v1/strategy/accept-proposal/{{ r.id }}"
-                  hx-swap="none"
-                  hx-confirm="Appliquer la proposition de Claude ?"
-                  data-toast="Programme mis a jour par Claude">Accepter</button>
+          <button
+            class="btn-sm btn-primary"
+            hx-post="/api/v1/strategy/accept-proposal/{{ r.id }}"
+            hx-swap="none"
+            hx-confirm="Appliquer la proposition de Claude ?"
+            data-toast="Programme mis a jour par Claude"
+          >
+            Accepter
+          </button>
           {% elif r.proposal_status == 'accepted' %}
           <span class="pill pill-success">appliquee</span>
+          {% elif r.proposal_status == 'auto-accepted' %}
+          <span class="pill pill-info">auto</span>
           {% else %}
-          <span style="color:var(--muted);">—</span>
+          <span style="color: var(--muted)">—</span>
           {% endif %}
         </td>
       </tr>
@@ -182,7 +286,9 @@
     </tbody>
   </table>
   {% else %}
-  <p style="color:var(--muted);font-size:0.88rem;">Aucun cycle execute. Active la boucle ci-dessus pour commencer.</p>
+  <p style="color: var(--muted); font-size: 0.88rem">
+    Aucun cycle execute. Active la boucle ci-dessus pour commencer.
+  </p>
   {% endif %}
 </div>
 

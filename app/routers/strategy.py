@@ -1,7 +1,8 @@
+import json
 from datetime import datetime
 
 from fastapi import APIRouter, Form, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 
 from app.config import settings
@@ -38,6 +39,12 @@ async def strategy_page(request: Request):
         cursor = await db.execute("SELECT * FROM research_runs ORDER BY started_at DESC LIMIT 10")
         runs = [dict(r) for r in await cursor.fetchall()]
 
+        # Check if we have any metrics data
+        cursor = await db.execute(
+            "SELECT COUNT(*) FROM research_runs WHERE metric_json IS NOT NULL AND metric_json != ''"
+        )
+        has_metrics = (await cursor.fetchone())[0] > 0
+
     return templates.TemplateResponse(
         request,
         "strategy.html",
@@ -47,6 +54,8 @@ async def strategy_page(request: Request):
             "versions": versions,
             "acquaintances": acquaintances,
             "runs": runs,
+            "has_metrics": has_metrics,
+            "auto_accept": settings.AUTO_ACCEPT_IMPROVEMENTS,
             "loop": _get_loop_state(request),
             "interval": settings.SCRAPE_INTERVAL_MINUTES,
             "active_nav": "strategy",
@@ -310,6 +319,40 @@ async def trigger_research_run(request: Request):
                     scored += 1
             await db.commit()
 
+        # Step 5.5: Claude deep analysis on newly scored prospects
+        analyzed = 0
+        try:
+            from app.services.deep_analysis_service import DeepAnalysisService
+            deep_svc = DeepAnalysisService()
+            _prog_version, _prog_content = await research._load_program(db)
+            _acqs = await research._load_acquaintances(db)
+
+            # Prospects with experience but no Claude analysis (max 5 per run)
+            da_cursor = await db.execute(
+                "SELECT id FROM prospects "
+                "WHERE experience_json IS NOT NULL AND experience_json != '' AND experience_json != '[]' "
+                "AND (claude_analysis IS NULL OR claude_analysis = '') "
+                "ORDER BY relevance_score DESC LIMIT 5"
+            )
+            da_ids = [row[0] for row in await da_cursor.fetchall()]
+
+            for pid in da_ids:
+                prospect = await repo.find_by_id(pid)
+                if not prospect:
+                    continue
+                try:
+                    analysis = await deep_svc.analyze_prospect(prospect, _prog_content, _acqs)
+                    await repo.update(pid, {"claude_analysis": _json.dumps(analysis, ensure_ascii=False)})
+                    analyzed += 1
+                except Exception as e:
+                    import logging as _log
+                    _log.getLogger("okoone.deep_analysis").error(
+                        "Manual run analysis error for %d: %s", pid, str(e)[:100]
+                    )
+            await db.commit()
+        except Exception:
+            pass  # non-blocking — scoring is more important
+
         # Step 6: Record run
         v_cursor = await db.execute(
             "SELECT version FROM prospect_program WHERE status = 'active' ORDER BY version DESC LIMIT 1"
@@ -333,9 +376,10 @@ async def trigger_research_run(request: Request):
                 "warning",
             )
 
+        analyzed_html = f" | {analyzed} analyses Claude" if analyzed > 0 else ""
         return HTMLResponse(f"""<div style="padding:1rem;border:1px solid var(--success);border-radius:var(--radius-sm);font-size:0.88rem;background:var(--success-dim);">
             <strong>Cycle termine</strong><br>
-            {len(queries[:5])} queries | {total_found} resultats LinkedIn | {total_new} nouveaux prospects | {scored} scores<br>
+            {len(queries[:5])} queries | {total_found} resultats LinkedIn | {total_new} nouveaux prospects | {scored} scores{analyzed_html}<br>
             <span style="color:var(--muted);font-size:0.8rem;">
                 Rate limits: {rate_stats['search']['used']}/{rate_stats['search']['limit']} recherches,
                 {rate_stats['profile']['used']}/{rate_stats['profile']['limit']} profils
@@ -370,3 +414,180 @@ async def accept_proposal(run_id: int):
         )
         await db.commit()
     return {"ok": True}
+
+
+@router.get("/api/v1/strategy/metrics", response_class=JSONResponse)
+async def get_metrics_trend():
+    """Return metrics history for the last 20 cycles + top queries."""
+    async with get_db() as db:
+        # Metrics per cycle
+        cursor = await db.execute("""
+            SELECT id, program_version, started_at, finished_at,
+                   prospects_found, prospects_qualified, metric_json,
+                   status, proposal_status
+            FROM research_runs
+            WHERE metric_json IS NOT NULL AND metric_json != ''
+            ORDER BY started_at DESC
+            LIMIT 20
+        """)
+        runs_raw = await cursor.fetchall()
+
+        cycles = []
+        for r in runs_raw:
+            metrics = {}
+            try:
+                metrics = json.loads(r[6]) if r[6] else {}
+            except (json.JSONDecodeError, TypeError):
+                pass
+            cycles.append({
+                "run_id": r[0],
+                "program_version": r[1],
+                "started_at": r[2],
+                "finished_at": r[3],
+                "prospects_found": r[4],
+                "prospects_qualified": r[5],
+                "status": r[7],
+                "proposal_status": r[8],
+                "qualification_rate": metrics.get("qualification_rate"),
+                "novelty_rate": metrics.get("novelty_rate"),
+                "diversity_score": metrics.get("diversity_score"),
+                "avg_score": metrics.get("avg_score"),
+            })
+
+        # Top performing queries
+        cursor = await db.execute("""
+            SELECT search_keywords, search_location,
+                   SUM(prospects_found) as total_found,
+                   SUM(prospects_new) as total_new,
+                   AVG(avg_score) as mean_score,
+                   MAX(best_score) as top_score,
+                   SUM(qualified_count) as total_qualified,
+                   COUNT(*) as times_used
+            FROM query_performance
+            GROUP BY search_keywords, search_location
+            ORDER BY mean_score DESC, total_qualified DESC
+            LIMIT 15
+        """)
+        queries_raw = await cursor.fetchall()
+
+        top_queries = []
+        for q in queries_raw:
+            top_queries.append({
+                "keywords": q[0],
+                "location": q[1],
+                "total_found": q[2],
+                "total_new": q[3],
+                "mean_score": round(q[4], 1) if q[4] else 0,
+                "top_score": round(q[5], 1) if q[5] else 0,
+                "total_qualified": q[6],
+                "times_used": q[7],
+            })
+
+    return JSONResponse({
+        "cycles": list(reversed(cycles)),  # chronological order
+        "top_queries": top_queries,
+        "auto_accept": settings.AUTO_ACCEPT_IMPROVEMENTS,
+    })
+
+
+@router.get("/api/v1/strategy/metrics-panel", response_class=HTMLResponse)
+async def metrics_panel():
+    """Render the metrics trend panel as HTML (htmx partial)."""
+    async with get_db() as db:
+        cursor = await db.execute("""
+            SELECT id, program_version, started_at, prospects_found,
+                   prospects_qualified, metric_json, status
+            FROM research_runs
+            WHERE metric_json IS NOT NULL AND metric_json != ''
+            ORDER BY started_at DESC LIMIT 10
+        """)
+        runs_raw = await cursor.fetchall()
+
+        cursor = await db.execute("""
+            SELECT search_keywords, search_location,
+                   AVG(avg_score) as mean_score,
+                   SUM(qualified_count) as total_qualified,
+                   SUM(prospects_found) as total_found,
+                   COUNT(*) as times_used
+            FROM query_performance
+            GROUP BY search_keywords, search_location
+            HAVING total_found > 0
+            ORDER BY mean_score DESC
+            LIMIT 10
+        """)
+        queries_raw = await cursor.fetchall()
+
+    if not runs_raw:
+        return HTMLResponse(
+            '<p style="color:var(--muted);font-size:0.88rem;">Pas encore de metriques. '
+            'Les metriques apparaitront apres le premier cycle complet.</p>'
+        )
+
+    # Build metrics table rows
+    rows_html = ""
+    for r in reversed(list(runs_raw)):
+        metrics = {}
+        try:
+            metrics = json.loads(r[5]) if r[5] else {}
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+        qual_rate = metrics.get("qualification_rate", "—")
+        novelty = metrics.get("novelty_rate", "—")
+        diversity = metrics.get("diversity_score", "—")
+        avg_s = metrics.get("avg_score", "—")
+
+        qual_color = "var(--success)" if isinstance(qual_rate, (int, float)) and qual_rate > 30 else "var(--text)"
+        novelty_color = "var(--warning)" if isinstance(novelty, (int, float)) and novelty < 20 else "var(--text)"
+
+        rows_html += f"""<tr>
+            <td style="font-size:0.8rem;color:var(--muted);">{r[2][:16] if r[2] else '—'}</td>
+            <td>v{r[1]}</td>
+            <td>{r[3]}</td>
+            <td style="color:{qual_color};font-weight:600;">{qual_rate}{'%' if isinstance(qual_rate, (int, float)) else ''}</td>
+            <td style="color:{novelty_color};">{novelty}{'%' if isinstance(novelty, (int, float)) else ''}</td>
+            <td>{diversity}</td>
+            <td>{avg_s}</td>
+        </tr>"""
+
+    # Build query performance rows
+    queries_html = ""
+    for q in queries_raw:
+        mean_s = round(q[2], 1) if q[2] else 0
+        score_color = "var(--success)" if mean_s > 40 else "var(--warning)" if mean_s > 20 else "var(--error)"
+        queries_html += f"""<tr>
+            <td style="font-size:0.85rem;max-width:200px;overflow:hidden;text-overflow:ellipsis;">{q[0]}</td>
+            <td style="color:var(--muted);">{q[1] or 'any'}</td>
+            <td style="color:{score_color};font-weight:600;">{mean_s}</td>
+            <td>{q[3]}/{q[4]}</td>
+            <td style="color:var(--muted);">{q[5]}x</td>
+        </tr>"""
+
+    html = f"""
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
+      <div>
+        <h4 style="margin:0 0 0.5rem;font-size:0.9rem;">Tendance des metriques</h4>
+        <div style="overflow-x:auto;">
+          <table style="font-size:0.82rem;">
+            <thead><tr>
+              <th>Date</th><th>Prog</th><th>Trouves</th>
+              <th>Qual%</th><th>Nouv%</th><th>Div</th><th>Avg</th>
+            </tr></thead>
+            <tbody>{rows_html}</tbody>
+          </table>
+        </div>
+      </div>
+      <div>
+        <h4 style="margin:0 0 0.5rem;font-size:0.9rem;">Queries les plus performantes</h4>
+        <div style="overflow-x:auto;">
+          <table style="font-size:0.82rem;">
+            <thead><tr>
+              <th>Keywords</th><th>Loc</th><th>Score moy</th><th>Qual/Total</th><th>Utilise</th>
+            </tr></thead>
+            <tbody>{queries_html if queries_html else '<tr><td colspan="5" style="color:var(--muted);">Pas encore de donnees query</td></tr>'}</tbody>
+          </table>
+        </div>
+      </div>
+    </div>"""
+
+    return HTMLResponse(html)

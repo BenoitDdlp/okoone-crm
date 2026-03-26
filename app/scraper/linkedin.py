@@ -12,10 +12,107 @@ import logging
 import random
 from urllib.parse import quote
 
+import re as _re
+
 from app.scraper.parser import parse_search_results
 from app.scraper.rate_limiter import RateLimiter
 
 logger = logging.getLogger(__name__)
+
+# ------------------------------------------------------------------ #
+# Post-extraction sanitisation
+# ------------------------------------------------------------------ #
+
+_GARBAGE_NAME_PATTERNS = [
+    _re.compile(r"^Status is (offline|online|reachable)$", _re.IGNORECASE),
+    _re.compile(r"View .+[\u2018\u2019']s\s+profile", _re.IGNORECASE),
+    _re.compile(r"^Provides services", _re.IGNORECASE),
+    _re.compile(r"^ACoAA"),
+]
+
+_VIEW_PROFILE_SUFFIX = _re.compile(
+    r"View\s+.+[\u2018\u2019']s\s+profile\s*$", _re.IGNORECASE
+)
+
+
+def _sanitize_search_results(results: list[dict[str, str]]) -> list[dict[str, str]]:
+    """Clean up known garbage patterns from search results.
+
+    This is a safety net that runs after both the primary and fallback
+    extractors, so even if the DOM parsing lets something through, we
+    catch it here before it reaches the database.
+    """
+    clean: list[dict[str, str]] = []
+    for r in results:
+        name = r.get("full_name", "").strip()
+        headline = r.get("headline", "").strip()
+        location = r.get("location", "").strip()
+
+        # Step 1: Strip "View X's profile" suffix from name (handles
+        # "Georges S.View Georges S.'s profile" -> "Georges S.")
+        name = _VIEW_PROFILE_SUFFIX.sub("", name).strip()
+
+        # Step 2: Check if the (possibly cleaned) name is still garbage
+        name_is_bad = not name or len(name) < 2
+        if not name_is_bad:
+            for pat in _GARBAGE_NAME_PATTERNS:
+                if pat.search(name):
+                    name_is_bad = True
+                    break
+
+        if name_is_bad:
+            # Try to recover name from headline ("RealNameView RealName's profile")
+            m = _re.search(
+                r"View\s+(.+?)[\u2018\u2019']\s*s\s+profile\s*$", headline
+            )
+            if m:
+                name = m.group(1).strip()
+            elif headline and len(headline) >= 2:
+                # Headline itself might be a clean name (from earlier extraction)
+                hl_ok = True
+                for pat in _GARBAGE_NAME_PATTERNS:
+                    if pat.search(headline):
+                        hl_ok = False
+                        break
+                if hl_ok:
+                    # Don't use headline as name if it looks like a job title
+                    pass  # safer to drop than to misassign
+                # Cannot recover a meaningful name; skip this result entirely
+                if not name or len(name) < 2:
+                    logger.debug(
+                        "Dropping result with unrecoverable name: %s (%s)",
+                        r.get("full_name"),
+                        r.get("profile_username"),
+                    )
+                    continue
+            else:
+                logger.debug(
+                    "Dropping result with unrecoverable name: %s (%s)",
+                    r.get("full_name"),
+                    r.get("profile_username"),
+                )
+                continue
+
+        # Clean headline: remove "View X's profile" suffix
+        headline = _VIEW_PROFILE_SUFFIX.sub("", headline).strip()
+
+        # Clean location: remove status indicators and profile view text
+        if _re.match(r"^Status is ", location, _re.IGNORECASE):
+            location = ""
+        if "View " in location and "profile" in location:
+            location = ""
+
+        r["full_name"] = name
+        r["headline"] = headline
+        r["location"] = location
+        clean.append(r)
+
+    dropped = len(results) - len(clean)
+    if dropped > 0:
+        logger.info("Sanitisation dropped %d results with bad data", dropped)
+
+    return clean
+
 
 # ------------------------------------------------------------------ #
 # User-agent rotation pool
@@ -217,6 +314,21 @@ class LinkedInScraper:
             const SKIP = ['Status is online', 'Status is offline', 'Status is reachable',
                           'Connect', 'Follow', 'Message', 'Pending', 'Send InMail'];
 
+            // Helper: strip "View X's profile" suffix (handles both curly and straight apostrophes)
+            function stripViewProfile(s) {
+                return s.replace(/View\\s+.+[\\u2018\\u2019']s\\s+profile$/i, '')
+                        .replace(/[\\u2018\\u2019']s\\s+profile$/i, '')
+                        .trim();
+            }
+            // Helper: check if text is noise (status indicators, profile view text, buttons)
+            function isNoise(t) {
+                if (SKIP.includes(t)) return true;
+                if (/^Status is /i.test(t)) return true;
+                if (/^View /i.test(t) && /profile/i.test(t)) return true;
+                if (/[\\u2018\\u2019']s\\s+profile$/i.test(t)) return true;
+                return false;
+            }
+
             for (const card of cards) {
                 const link = card.querySelector('a[href*="/in/"]');
                 if (!link) continue;
@@ -228,11 +340,15 @@ class LinkedInScraper:
                 let name = '';
                 const ariaLabel = link.getAttribute('aria-label');
                 if (ariaLabel) {
-                    name = ariaLabel.replace(/View .+'s profile$/, '').replace(/'s profile$/, '').trim();
+                    name = stripViewProfile(ariaLabel);
                 }
-                if (!name) {
+                if (!name || isNoise(name)) {
+                    name = '';
                     const hiddenSpan = link.querySelector('span[aria-hidden="true"]');
-                    if (hiddenSpan) name = hiddenSpan.textContent.trim();
+                    if (hiddenSpan) {
+                        const t = hiddenSpan.textContent.trim();
+                        if (!isNoise(t)) name = t;
+                    }
                 }
 
                 // Collect meaningful text spans (skip status/buttons)
@@ -240,9 +356,7 @@ class LinkedInScraper:
                 card.querySelectorAll('span').forEach(s => {
                     const t = s.textContent.trim();
                     if (t && t.length > 2 && t.length < 200
-                        && !SKIP.includes(t)
-                        && !t.startsWith('View ')
-                        && !t.includes("'s profile")
+                        && !isNoise(t)
                         && t !== name) {
                         texts.push(t);
                     }
@@ -284,48 +398,124 @@ class LinkedInScraper:
             logger.info("  [%d] %s — %s (%s)", i, r.get("full_name"), r.get("headline", "")[:50], r.get("profile_username"))
 
         if not results:
-            # Fallback: parse from visible text + href links (same approach as LinkedIn MCP)
-            logger.info("JS selector found 0, trying text+links fallback...")
+            # Fallback: richer extraction from profile links + surrounding context
+            logger.info("JS selector found 0, trying enhanced fallback...")
             try:
                 visible = await self._page.inner_text("body")
                 logger.info("Visible text (500 chars): %s", visible[:500].replace("\n", " | "))
 
-                # Extract all /in/ links from the page
+                # Extract profile links with aria-label, clean text, and
+                # sibling/parent context for headline extraction
                 all_links = await self._page.evaluate("""() => {
-                    return Array.from(document.querySelectorAll('a[href*="/in/"]'))
-                        .map(a => ({href: a.href, text: a.textContent.trim()}))
-                        .filter(a => a.text.length > 0 && !a.text.includes('Premium'));
+                    const SKIP_LINES = [
+                        'Status is', 'View ', 'Connect', 'Follow', 'Message',
+                        'Pending', 'Send InMail', 'Premium', 'Repost', 'Like',
+                        'Comment', 'Share', 'Report', 'Save'
+                    ];
+                    function isNoise(t) {
+                        return SKIP_LINES.some(s => t.includes(s));
+                    }
+                    function cleanLines(raw) {
+                        return raw.split('\\n')
+                            .map(l => l.trim())
+                            .filter(l => l.length > 1 && !isNoise(l));
+                    }
+
+                    const links = document.querySelectorAll('a[href*="/in/"]');
+                    const results = [];
+                    const seenHrefs = new Set();
+
+                    for (const a of links) {
+                        const href = a.getAttribute('href') || '';
+                        const m = href.match(/\\/in\\/([^/?]+)/);
+                        if (!m) continue;
+                        if (seenHrefs.has(m[1])) continue;
+                        seenHrefs.add(m[1]);
+
+                        // Strategy 1: aria-label (e.g. "View John Doe's profile")
+                        let name = '';
+                        const ariaLabel = a.getAttribute('aria-label') || '';
+                        if (ariaLabel) {
+                            name = ariaLabel
+                                .replace(/^View\\s+/i, '')
+                                .replace(/[\\u2019']s\\s+profile$/i, '')
+                                .trim();
+                        }
+
+                        // Strategy 2: span[aria-hidden="true"] inside the link
+                        if (!name) {
+                            const hiddenSpan = a.querySelector('span[aria-hidden="true"]');
+                            if (hiddenSpan) {
+                                const t = hiddenSpan.textContent.trim();
+                                if (t && !isNoise(t)) name = t;
+                            }
+                        }
+
+                        // Strategy 3: textContent lines, skipping noise
+                        if (!name) {
+                            const lines = cleanLines(a.textContent || '');
+                            if (lines.length > 0) name = lines[0];
+                        }
+
+                        if (!name || name.length < 2) continue;
+
+                        // Extract headline from nearby context:
+                        // Walk up to the closest <li> or container, then grab
+                        // non-noise text spans that aren't the name itself
+                        let headline = '';
+                        const container = a.closest('li') || a.closest('[data-view-name]') || a.parentElement?.parentElement?.parentElement;
+                        if (container) {
+                            const spans = container.querySelectorAll('span[aria-hidden="true"], span.t-14');
+                            for (const s of spans) {
+                                const t = s.textContent.trim();
+                                if (t && t !== name && t.length > 3 && t.length < 200 && !isNoise(t)
+                                    && !/^\\d+(st|nd|rd|th)$/.test(t)) {
+                                    headline = t;
+                                    break;
+                                }
+                            }
+                        }
+
+                        results.push({
+                            username: m[1],
+                            name: name,
+                            headline: headline
+                        });
+                    }
+                    return results;
                 }""")
-                logger.info("Found %d profile links via fallback", len(all_links))
+                logger.info("Found %d profile links via enhanced fallback", len(all_links))
 
-                seen = set()
                 for link in all_links:
-                    import re as _re
-                    m = _re.search(r"/in/([^/?]+)", link.get("href", ""))
-                    if not m:
-                        continue
-                    username = m.group(1)
-                    if username in seen:
-                        continue
-                    seen.add(username)
-
-                    # Parse name from link text
-                    name = link.get("text", "").split("\n")[0].strip()
-                    name = _re.sub(r"View .+'s profile$", "", name).strip()
-                    if not name or len(name) < 2:
-                        continue
-
                     results.append({
-                        "full_name": name,
-                        "headline": "",
+                        "full_name": link.get("name", ""),
+                        "headline": link.get("headline", ""),
                         "location": "",
-                        "linkedin_url": f"https://www.linkedin.com/in/{username}/",
-                        "profile_username": username,
+                        "linkedin_url": f"https://www.linkedin.com/in/{link['username']}/",
+                        "profile_username": link["username"],
                     })
 
-                logger.info("Fallback extracted %d results", len(results))
+                logger.info("Enhanced fallback extracted %d results", len(results))
             except Exception:
-                logger.error("Fallback extraction failed", exc_info=True)
+                logger.error("Enhanced fallback extraction failed", exc_info=True)
+
+        # Retry logic: if we still got 0 results, reload and try once more
+        if not results and not getattr(self, '_search_retried', False):
+            self._search_retried = True
+            logger.info("Zero results — retrying after 5s reload...")
+            await asyncio.sleep(5)
+            await self._page.reload(wait_until="domcontentloaded")
+            await self._human_scroll()
+            await asyncio.sleep(random.uniform(2.0, 4.0))
+            results = await self.search_people(keywords, location, page)
+            self._search_retried = False
+            return results
+        self._search_retried = False
+
+        # Final safety net: sanitize all results to catch any garbage that
+        # slipped through both extractors (e.g. "Status is offline" as name,
+        # "View X's profile" suffixes in any field).
+        results = _sanitize_search_results(results)
 
         return results
 
@@ -455,65 +645,98 @@ class LinkedInScraper:
 
             // ---- Headline (text right below h1) ----
             try {
-                // The headline is typically in a div sibling just below h1.
-                // Strategy: find h1's parent, then look for the next div
-                const h1 = document.querySelector('h1');
-                if (h1) {
-                    // Walk siblings of h1 or its parent
-                    let container = h1.parentElement;
-                    if (container) {
-                        const divs = container.parentElement
-                            ? container.parentElement.querySelectorAll('div')
-                            : container.querySelectorAll('div');
-                        for (const d of divs) {
-                            const t = visibleText(d);
-                            if (t && t !== result.full_name && t.length > 3 && t.length < 300) {
-                                // Skip if it looks like a location or connections line
-                                if (t.includes('connections') || t.includes('followers')) continue;
-                                result.headline = t;
-                                break;
+                // Strategy 1: div.text-body-medium is the most stable selector
+                const hDiv = document.querySelector('div.text-body-medium');
+                if (hDiv) {
+                    result.headline = visibleText(hDiv);
+                }
+                // Strategy 2: div[data-generated-suggestion-target]
+                if (!result.headline) {
+                    const sgDiv = document.querySelector('div[data-generated-suggestion-target]');
+                    if (sgDiv) result.headline = visibleText(sgDiv);
+                }
+                // Strategy 3: walk from h1 parent to find the headline div
+                if (!result.headline) {
+                    const h1 = document.querySelector('h1');
+                    if (h1) {
+                        let container = h1.closest('section') || h1.closest('div.mt2') || h1.parentElement?.parentElement;
+                        if (container) {
+                            const divs = container.querySelectorAll('div');
+                            for (const d of divs) {
+                                const t = visibleText(d);
+                                if (t && t !== result.full_name && t.length > 3 && t.length < 300
+                                    && !t.includes('connections') && !t.includes('followers')
+                                    && !t.includes('Contact info') && !t.includes('mutual')) {
+                                    result.headline = t;
+                                    break;
+                                }
                             }
                         }
                     }
                 }
-                // Fallback: look for div[data-generated-suggestion-target]
+                // Strategy 4: og:description meta often contains the headline
                 if (!result.headline) {
-                    const hDiv = document.querySelector('div[data-generated-suggestion-target]');
-                    if (hDiv) result.headline = visibleText(hDiv);
+                    const ogDesc = document.querySelector('meta[property="og:description"]');
+                    if (ogDesc) {
+                        const c = (ogDesc.getAttribute('content') || '').split(' - ')[0].trim();
+                        if (c && c !== result.full_name) result.headline = c;
+                    }
                 }
             } catch(e) {}
 
             // ---- Location ----
             try {
-                // Location often sits in a span near h1's section, sometimes
-                // with class containing "location" or near a map-pin svg.
-                const topCard = document.querySelector('h1')?.closest('section')
-                    || document.querySelector('h1')?.closest('main')
-                    || document.querySelector('main');
-                if (topCard) {
-                    // Look for a span whose text looks like a location (not
-                    // connections/followers). LinkedIn sometimes uses a span
-                    // right after the headline area.
-                    const spans = topCard.querySelectorAll('span');
-                    for (const s of spans) {
-                        const t = (s.textContent || '').trim();
-                        // Location patterns: "City, Country" or "Greater X Area"
-                        if (t && t.length > 3 && t.length < 120
-                            && !t.includes('connections') && !t.includes('followers')
-                            && !t.includes('Contact info')
-                            && t !== result.full_name && t !== result.headline) {
-                            // Heuristic: contains a comma or known geo terms
-                            if (t.includes(',') || /region|area|france|paris|london|new york|singapore|city|country/i.test(t)) {
-                                result.location = t;
-                                break;
+                // Strategy 1: span.text-body-small with inline class (most stable)
+                const locSpan = document.querySelector('span.text-body-small.inline.t-black--light');
+                if (locSpan) {
+                    result.location = visibleText(locSpan);
+                }
+                // Strategy 2: look for a span with class containing "top-card" + "location"
+                if (!result.location) {
+                    const locEl = document.querySelector('[class*="top-card"] [class*="location"]')
+                        || document.querySelector('[class*="pv-text-details"] span.text-body-small');
+                    if (locEl) result.location = visibleText(locEl);
+                }
+                // Strategy 3: scan spans in the top card for location-like text
+                if (!result.location) {
+                    const topCard = document.querySelector('h1')?.closest('section')
+                        || document.querySelector('h1')?.closest('main')
+                        || document.querySelector('main');
+                    if (topCard) {
+                        const spans = topCard.querySelectorAll('span');
+                        for (const s of spans) {
+                            const t = (s.textContent || '').trim();
+                            if (t && t.length > 3 && t.length < 120
+                                && !t.includes('connections') && !t.includes('followers')
+                                && !t.includes('Contact info') && !t.includes('mutual')
+                                && t !== result.full_name && t !== result.headline) {
+                                if (t.includes(',') || /region|area|metro|greater|france|paris|london|new york|singapore|hong kong|bangkok|tokyo|berlin|country|province|state/i.test(t)) {
+                                    result.location = t;
+                                    break;
+                                }
                             }
                         }
                     }
                 }
-                // Fallback: look for geo_location in meta or JSON-LD
+                // Strategy 4: geo.placename meta
                 if (!result.location) {
                     const geo = document.querySelector('meta[name="geo.placename"]');
                     if (geo) result.location = geo.getAttribute('content') || '';
+                }
+                // Strategy 5: og:description often contains "location" after a dash
+                if (!result.location) {
+                    const ogDesc = document.querySelector('meta[property="og:description"]');
+                    if (ogDesc) {
+                        const parts = (ogDesc.getAttribute('content') || '').split(' - ');
+                        // Last part before "LinkedIn" is often the location
+                        for (let i = parts.length - 1; i >= 1; i--) {
+                            const p = parts[i].replace(/LinkedIn.*$/, '').trim();
+                            if (p && p.length > 2 && p.length < 80) {
+                                result.location = p;
+                                break;
+                            }
+                        }
+                    }
                 }
             } catch(e) {}
 
@@ -704,6 +927,163 @@ class LinkedInScraper:
         logger.info("  profile_photo_url: %s", "yes" if profile.get("profile_photo_url") else "(empty)")
 
         return profile
+
+    # -------------------------------------------------------------- #
+    # Company enrichment
+    # -------------------------------------------------------------- #
+
+    async def get_company_info(self, company_name: str) -> dict:
+        """Fetch company information from its LinkedIn page.
+
+        Navigates to the company's LinkedIn page and extracts structured data
+        including size, industry, description, and headquarters.
+
+        Returns a dict with keys:
+            name, linkedin_url, industry, company_size, description,
+            headquarters, website, founded, specialties
+        """
+        if not self._page:
+            raise RuntimeError("Scraper not started; call start() first")
+
+        await self._rate_limiter.acquire("profile")
+
+        # Build the company search URL — LinkedIn company pages use /company/<slug>
+        # We try the slugified company name first; if not found we search
+        slug = (
+            company_name.lower()
+            .replace(" ", "-")
+            .replace(",", "")
+            .replace(".", "")
+            .replace("&", "and")
+        )
+        # Remove double dashes
+        while "--" in slug:
+            slug = slug.replace("--", "-")
+        slug = slug.strip("-")
+
+        company_url = f"https://www.linkedin.com/company/{quote(slug, safe='-')}/about/"
+        logger.info("Fetching company info: %s → %s", company_name, company_url)
+
+        await self._page.goto(company_url, wait_until="domcontentloaded")
+        await asyncio.sleep(random.uniform(2.0, 4.0))
+
+        # Check if we landed on a valid company page or got redirected
+        current_url = self._page.url
+        if "/company/" not in current_url:
+            logger.warning("Company page redirect — not a valid company URL: %s", current_url)
+            return {"name": company_name, "error": "company_not_found"}
+
+        # Scroll to load lazy content
+        for _ in range(3):
+            await self._page.mouse.wheel(0, random.randint(300, 500))
+            await asyncio.sleep(random.uniform(0.3, 0.6))
+        await self._page.evaluate("window.scrollTo(0, 0)")
+        await asyncio.sleep(random.uniform(1.0, 2.0))
+
+        company = await self._page.evaluate("""(companyName) => {
+            function visibleText(el) {
+                if (!el) return '';
+                return (el.textContent || '').replace(/\\s+/g, ' ').trim();
+            }
+
+            const result = {
+                name: companyName,
+                linkedin_url: window.location.href.replace(/\\/about\\/?$/, '/'),
+                industry: '',
+                company_size: '',
+                description: '',
+                headquarters: '',
+                website: '',
+                founded: '',
+                specialties: ''
+            };
+
+            // ---- Company name from the page (more authoritative) ----
+            try {
+                const h1 = document.querySelector('h1');
+                if (h1) {
+                    const t = visibleText(h1);
+                    if (t) result.name = t;
+                }
+            } catch(e) {}
+
+            // ---- Description / overview ----
+            try {
+                // The about section often has a <p> or <span> with the description
+                const aboutSection = document.querySelector('section.org-about-module')
+                    || document.querySelector('[class*="about-us"]')
+                    || document.querySelector('section[data-test-id="about-us"]');
+                if (aboutSection) {
+                    const p = aboutSection.querySelector('p')
+                        || aboutSection.querySelector('span[aria-hidden="true"]')
+                        || aboutSection.querySelector('div[class*="break-words"]');
+                    if (p) result.description = visibleText(p);
+                }
+                // Fallback: og:description
+                if (!result.description) {
+                    const og = document.querySelector('meta[property="og:description"]');
+                    if (og) result.description = (og.getAttribute('content') || '').trim();
+                }
+            } catch(e) {}
+
+            // ---- Structured details (dt/dd pairs on the /about/ page) ----
+            try {
+                // LinkedIn company about pages use <dt>Label</dt><dd>Value</dd>
+                const dts = document.querySelectorAll('dt');
+                for (const dt of dts) {
+                    const label = visibleText(dt).toLowerCase();
+                    const dd = dt.nextElementSibling;
+                    if (!dd) continue;
+                    const value = visibleText(dd);
+                    if (!value) continue;
+
+                    if (label.includes('website')) {
+                        result.website = value;
+                    } else if (label.includes('industry')) {
+                        result.industry = value;
+                    } else if (label.includes('company size') || label.includes('taille')) {
+                        result.company_size = value;
+                    } else if (label.includes('headquarters') || label.includes('siege')
+                               || label.includes('siège')) {
+                        result.headquarters = value;
+                    } else if (label.includes('founded') || label.includes('fond')) {
+                        result.founded = value;
+                    } else if (label.includes('specialties') || label.includes('spécialisations')
+                               || label.includes('specialisations')) {
+                        result.specialties = value;
+                    }
+                }
+            } catch(e) {}
+
+            // ---- Fallback: parse from the sidebar / header area ----
+            try {
+                if (!result.industry) {
+                    const indEl = document.querySelector('[class*="org-top-card-summary-info-list"] [class*="industry"]')
+                        || document.querySelector('[class*="top-card"] [class*="industry"]');
+                    if (indEl) result.industry = visibleText(indEl);
+                }
+                if (!result.company_size) {
+                    const sizeEl = document.querySelector('[class*="org-top-card-summary-info-list"] [class*="company-size"]');
+                    if (sizeEl) result.company_size = visibleText(sizeEl);
+                }
+                // Company size sometimes appears in text like "1,001-5,000 employees"
+                if (!result.company_size) {
+                    const allText = document.body.innerText || '';
+                    const sizeMatch = allText.match(/(\\d[\\d,]+-\\d[\\d,]+)\\s*employees/i)
+                        || allText.match(/(\\d[\\d,]+\\+?)\\s*employees/i);
+                    if (sizeMatch) result.company_size = sizeMatch[0];
+                }
+            } catch(e) {}
+
+            return result;
+        }""", company_name)
+
+        logger.info("Company info for '%s': industry=%s, size=%s, hq=%s",
+                     company.get("name"), company.get("industry") or "(empty)",
+                     company.get("company_size") or "(empty)",
+                     company.get("headquarters") or "(empty)")
+
+        return company
 
     # -------------------------------------------------------------- #
     # Anti-detection helpers
