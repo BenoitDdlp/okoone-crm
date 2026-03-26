@@ -92,10 +92,14 @@ async def run_research_loop() -> None:
             for i, q in enumerate(queries[:5]):
                 kw = q["keywords"]
                 loc = q.get("location")
+                logger.info("SCRAPE [%d/%d] keywords='%s' location='%s'", i + 1, min(len(queries), 5), kw, loc)
                 LOOP_STATE["current_step"] = f"Recherche {i+1}/{min(len(queries), 5)}: {kw[:40]}..."
 
                 try:
                     results = await _scraper.search_people(kw, loc)
+                    logger.info("SCRAPE [%d/%d] got %d results", i + 1, min(len(queries), 5), len(results))
+                    for j, r in enumerate(results[:3]):
+                        logger.info("  result[%d]: %s", j, {k: str(v)[:50] for k, v in r.items()})
                     total_found += len(results)
 
                     cursor = await db.execute(
@@ -107,6 +111,7 @@ async def run_research_loop() -> None:
                     for p in results:
                         username = (p.get("profile_username") or "").strip("/").split("/")[-1]
                         if not username or len(username) < 2:
+                            logger.debug("  skipping result with no username: %s", p.get("full_name"))
                             continue
                         _, is_new = await repo.upsert_by_username(username, {
                             "full_name": p.get("full_name", ""),
@@ -119,15 +124,16 @@ async def run_research_loop() -> None:
                         })
                         if is_new:
                             total_new += 1
+                            logger.info("  NEW prospect: %s (%s)", p.get("full_name"), username)
                     await db.commit()
 
-                except DailyLimitReached:
+                except DailyLimitReached as e:
                     LOOP_STATE["status"] = "rate_limited"
                     LOOP_STATE["current_step"] = "Rate limit LinkedIn atteint. Reprise demain."
-                    logger.info("Daily rate limit reached, stopping cycle.")
+                    logger.warning("RATE LIMIT: %s", e)
                     break
-                except Exception as e:
-                    logger.warning("Scrape error for '%s': %s", kw[:30], str(e)[:100])
+                except Exception:
+                    logger.error("SCRAPE ERROR for '%s':", kw, exc_info=True)
 
             # --- Step 5: Score new prospects ---
             LOOP_STATE["status"] = "evaluating"

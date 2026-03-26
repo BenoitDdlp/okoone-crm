@@ -88,8 +88,17 @@ class LinkedInScraper:
 
     async def start(self) -> None:
         """Launch headless Chromium with a persistent profile for session reuse."""
+        import os
         from patchright.async_api import async_playwright
 
+        # Remove stale lock files that prevent profile reuse
+        for lock_file in ("SingletonLock", "SingletonCookie", "SingletonSocket"):
+            lock_path = os.path.join(self._profile_dir, lock_file)
+            if os.path.exists(lock_path):
+                logger.info("Removing stale lock file: %s", lock_path)
+                os.unlink(lock_path)
+
+        logger.info("Starting browser with profile: %s", self._profile_dir)
         self._pw = await async_playwright().start()
         self._browser = await self._pw.chromium.launch_persistent_context(
             user_data_dir=self._profile_dir,
@@ -102,11 +111,12 @@ class LinkedInScraper:
             args=[
                 "--disable-blink-features=AutomationControlled",
                 "--disable-dev-shm-usage",
+                "--no-sandbox",
             ],
             ignore_default_args=["--enable-automation"],
         )
         self._page = await self._browser.new_page()
-        logger.info("LinkedIn scraper browser started (profile: %s)", self._profile_dir)
+        logger.info("Browser started OK. Pages: %d", len(self._browser.pages))
 
     async def stop(self) -> None:
         """Close the browser and Playwright server."""
@@ -136,15 +146,19 @@ class LinkedInScraper:
         redirects to a login or checkpoint page the session is expired.
         """
         if not self._page:
+            logger.warning("is_session_valid: no page object")
             return False
         try:
             await self._page.goto(
                 "https://www.linkedin.com/feed/", wait_until="domcontentloaded"
             )
+            await asyncio.sleep(2)
             current_url = self._page.url
-            return "/login" not in current_url and "/checkpoint" not in current_url
+            valid = "/login" not in current_url and "/checkpoint" not in current_url
+            logger.info("is_session_valid: url=%s valid=%s", current_url, valid)
+            return valid
         except Exception:
-            logger.warning("Session validity check failed", exc_info=True)
+            logger.error("is_session_valid: exception", exc_info=True)
             return False
 
     async def get_cookies(self) -> list[dict]:
@@ -196,8 +210,24 @@ class LinkedInScraper:
         await asyncio.sleep(random.uniform(1.0, 2.0))
 
         content = await self._page.content()
+        logger.info("Page HTML length: %d chars, URL: %s", len(content), self._page.url)
+
+        # Log a snippet to debug parser issues
+        if "reusable-search" in content:
+            logger.info("HTML contains 'reusable-search' markers (good)")
+        else:
+            logger.warning("HTML does NOT contain 'reusable-search' markers — parser may fail")
+            # Log visible text to understand what LinkedIn returned
+            try:
+                visible = await self._page.inner_text("body")
+                logger.info("Page visible text (first 500): %s", visible[:500].replace("\n", " | "))
+            except Exception:
+                pass
+
         results = parse_search_results(content)
-        logger.info("Found %d results for '%s'", len(results), keywords)
+        logger.info("Parsed %d results for '%s'", len(results), keywords)
+        if not results:
+            logger.warning("0 results parsed. Raw HTML snippet: %s", content[5000:6000].replace("\n", "")[:300])
         return results
 
     # -------------------------------------------------------------- #

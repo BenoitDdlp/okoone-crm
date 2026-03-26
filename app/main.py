@@ -1,8 +1,21 @@
 import hashlib
 import hmac
+import logging
+import sys
 import time
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
+
+# Force all logs to stderr (captured by systemd journalctl)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(name)s %(levelname)s %(message)s",
+    stream=sys.stderr,
+    force=True,
+)
+# Make our loggers verbose
+for name in ("okoone", "okoone.loop", "okoone.scraper", "okoone.claude"):
+    logging.getLogger(name).setLevel(logging.DEBUG)
 
 from fastapi import FastAPI, Form, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
