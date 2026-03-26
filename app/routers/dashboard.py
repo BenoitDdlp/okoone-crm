@@ -51,6 +51,7 @@ async def pipeline(request: Request, page: int = 1):
         skills = []
         traits = []
         score_breakdown: Optional[dict] = None
+        claude_analysis: Optional[dict] = None
         if prospect:
             if prospect.get("experience_json"):
                 try:
@@ -77,6 +78,13 @@ async def pipeline(request: Request, page: int = 1):
                     parsed = json.loads(prospect["score_breakdown"])
                     if isinstance(parsed, dict):
                         score_breakdown = parsed
+                except (json.JSONDecodeError, TypeError):
+                    pass
+            if prospect.get("claude_analysis"):
+                try:
+                    parsed_ca = json.loads(prospect["claude_analysis"])
+                    if isinstance(parsed_ca, dict):
+                        claude_analysis = parsed_ca
                 except (json.JSONDecodeError, TypeError):
                     pass
 
@@ -111,6 +119,7 @@ async def pipeline(request: Request, page: int = 1):
             "skills": skills,
             "traits": traits,
             "score_breakdown": score_breakdown,
+            "claude_analysis": claude_analysis,
             "recent_decisions": recent_decisions,
             "all_prospects": all_prospects,
             "page": page,

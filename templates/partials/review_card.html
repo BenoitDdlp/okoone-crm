@@ -46,18 +46,61 @@
   <div class="rc-body">
     <!-- Left column: profile details -->
     <div class="rc-col-left">
-      {% if prospect.about_text %}
+      {% set has_about = prospect.about_text %} {% set has_exp = experiences and
+      experiences|length > 0 %} {% set has_edu = education and education|length
+      > 0 %} {% set has_skills = skills and skills|length > 0 %} {% set
+      left_empty = not has_about and not has_exp and not has_edu and not
+      has_skills %} {% if left_empty %}
+      <div
+        style="
+          padding: 1.5rem;
+          border: 1px dashed var(--border-light);
+          border-radius: var(--radius-sm);
+          text-align: center;
+        "
+      >
+        <p style="color: var(--muted); margin-bottom: 0.75rem">
+          Profil non enrichi — les donnees LinkedIn n'ont pas encore ete
+          recuperees.
+        </p>
+        <button
+          class="btn-primary"
+          hx-post="/api/v1/prospects/{{ prospect.id }}/deep-screen"
+          hx-swap="none"
+          hx-indicator="#enrich-spinner"
+          data-toast="Enrichissement lance..."
+        >
+          Enrichir ce prospect
+        </button>
+        <span
+          id="enrich-spinner"
+          class="htmx-indicator"
+          style="color: var(--muted); font-size: 0.8rem"
+          >Scraping LinkedIn...</span
+        >
+      </div>
+      {% else %}
+
+      <!-- About -->
       <div class="rc-section">
         <div class="rc-section-title">
           <span class="rc-section-icon">&#9998;</span> A propos
         </div>
+        {% if prospect.about_text %}
         <p class="rc-about">{{ prospect.about_text }}</p>
+        {% else %}
+        <p class="rc-about" style="color: var(--muted); font-style: italic">
+          Aucune description disponible.
+        </p>
+        {% endif %}
       </div>
-      {% endif %} {% if experiences %}
+
+      <!-- Experience -->
       <div class="rc-section">
         <div class="rc-section-title">
           <span class="rc-section-icon">&#9733;</span> Experience
         </div>
+        {% if has_exp %}
         <div class="rc-timeline">
           {% for exp in experiences %}
           <div class="rc-timeline-item">
@@ -69,45 +112,81 @@
               </div>
               {% if exp.duration %}
               <div class="rc-timeline-duration">{{ exp.duration }}</div>
+              {% endif %} {% if exp.description %}
+              <div
+                class="rc-timeline-desc"
+                style="
+                  color: var(--muted);
+                  font-size: 0.85rem;
+                  margin-top: 0.25rem;
+                "
+              >
+                {{ exp.description }}
+              </div>
               {% endif %}
             </div>
           </div>
           {% endfor %}
         </div>
+        {% else %}
+        <p style="color: var(--muted); font-style: italic; font-size: 0.9rem">
+          Aucune experience renseignee.
+        </p>
+        {% endif %}
       </div>
-      {% endif %} {% if education %}
+
+      <!-- Education -->
       <div class="rc-section">
         <div class="rc-section-title">
           <span class="rc-section-icon">&#9734;</span> Formation
         </div>
-        {% for edu in education %}
+        {% if has_edu %} {% for edu in education %}
         <div class="rc-edu-item">
           <div class="rc-edu-school">
             {{ edu.school|default(edu.institution|default('')) }}
           </div>
-          {% if edu.degree or edu.field_of_study %}
+          {% if edu.degree or edu.field_of_study or edu.field %}
           <div class="rc-edu-degree">
-            {{ edu.degree|default('') }}{% if edu.field_of_study %} — {{
-            edu.field_of_study }}{% endif %}
+            {{ edu.degree|default('') }}{% if edu.field_of_study or edu.field %}
+            — {{ edu.field_of_study|default(edu.field|default('')) }}{% endif %}
+          </div>
+          {% endif %} {% if edu.years %}
+          <div
+            class="rc-edu-years"
+            style="color: var(--muted); font-size: 0.85rem"
+          >
+            {{ edu.years }}
           </div>
           {% endif %}
         </div>
-        {% endfor %}
+        {% endfor %} {% else %}
+        <p style="color: var(--muted); font-style: italic; font-size: 0.9rem">
+          Aucune formation renseignee.
+        </p>
+        {% endif %}
       </div>
-      {% endif %} {% if skills %}
+
+      <!-- Skills -->
       <div class="rc-section">
         <div class="rc-section-title">
           <span class="rc-section-icon">&#9881;</span> Competences
         </div>
+        {% if has_skills %}
         <div class="rc-tags">
           {% for skill in skills %}<span class="rc-tag">{{ skill }}</span>{%
           endfor %}
         </div>
+        {% else %}
+        <p style="color: var(--muted); font-style: italic; font-size: 0.9rem">
+          Aucune competence renseignee.
+        </p>
+        {% endif %}
       </div>
+
       {% endif %}
     </div>
 
-    <!-- Right column: scoring -->
+    <!-- Right column: scoring + analysis -->
     <div class="rc-col-right">
       {% if score_breakdown %}
       <div class="rc-section">
@@ -153,13 +232,47 @@
           {% endif %} {% endfor %}
         </div>
       </div>
+      {% endif %} {% if claude_analysis %}
+      <div class="rc-section">
+        <div class="rc-section-title">
+          <span class="rc-section-icon">&#9733;</span> Analyse approfondie
+        </div>
+        {% if claude_analysis.verdict %}
+        <div style="margin-bottom: 0.5rem">
+          <strong>Verdict:</strong> {{ claude_analysis.verdict }}
+        </div>
+        {% endif %} {% if claude_analysis.pros %}
+        <div style="margin-bottom: 0.5rem">
+          <strong>Points forts:</strong>
+          <ul style="margin: 0.25rem 0 0 1.2rem; padding: 0">
+            {% for pro in claude_analysis.pros %}
+            <li style="margin-bottom: 0.15rem">{{ pro }}</li>
+            {% endfor %}
+          </ul>
+        </div>
+        {% endif %} {% if claude_analysis.cons %}
+        <div style="margin-bottom: 0.5rem">
+          <strong>Points faibles:</strong>
+          <ul style="margin: 0.25rem 0 0 1.2rem; padding: 0">
+            {% for con in claude_analysis.cons %}
+            <li style="margin-bottom: 0.15rem">{{ con }}</li>
+            {% endfor %}
+          </ul>
+        </div>
+        {% endif %} {% if claude_analysis.outreach_angle %}
+        <div style="margin-bottom: 0.5rem">
+          <strong>Angle d'approche:</strong> {{ claude_analysis.outreach_angle
+          }}
+        </div>
+        {% endif %}
+      </div>
       {% endif %}
     </div>
   </div>
 
   <!-- Footer: LinkedIn link -->
-  {% if prospect.linkedin_url %}
   <div class="rc-footer">
+    {% if prospect.linkedin_url %}
     <a
       href="{{ prospect.linkedin_url }}"
       target="_blank"
@@ -168,8 +281,17 @@
     >
       <span class="rc-linkedin-icon">in</span> Voir le profil LinkedIn &rarr;
     </a>
+    {% else %}
+    <a
+      href="https://www.linkedin.com/in/{{ prospect.linkedin_username }}/"
+      target="_blank"
+      rel="noopener"
+      class="rc-linkedin-link"
+    >
+      <span class="rc-linkedin-icon">in</span> Voir le profil LinkedIn &rarr;
+    </a>
+    {% endif %}
   </div>
-  {% endif %}
 </div>
 
 <div class="review-actions">

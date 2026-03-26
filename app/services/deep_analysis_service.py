@@ -7,6 +7,7 @@ Produces a structured JSON analysis stored in the prospects table.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -241,4 +242,133 @@ class DeepAnalysisService:
         validated["fit_reasoning"] = str(result.get("fit_reasoning", ""))[:1000]
         validated["analyzed_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
+        return validated
+
+    # ------------------------------------------------------------------
+    # Web research enrichment
+    # ------------------------------------------------------------------
+
+    _WEB_RESEARCH_SYSTEM = (
+        "You are a web research assistant. Search the web for information about "
+        "people and companies. Return ONLY valid JSON — no markdown fences, no "
+        "commentary. If a field cannot be found, use an empty string or empty array."
+    )
+
+    _WEB_RESEARCH_FIELDS: dict[str, str | list] = {
+        "company_website": "",
+        "company_size": "",
+        "company_industry": "",
+        "company_funding": "",
+        "company_description": "",
+        "recent_news": [],
+        "technologies": [],
+        "social_presence": "",
+    }
+
+    async def web_research_prospect(self, prospect: dict) -> dict:
+        """Use Claude CLI (with web search) to find additional info about a prospect.
+
+        Returns {
+            company_website: str,
+            company_size: str,
+            company_industry: str,
+            company_funding: str,
+            company_description: str,
+            recent_news: [str],
+            technologies: [str],
+            social_presence: str,
+        }
+        """
+        name = prospect.get("full_name", "Unknown")
+        company = prospect.get("current_company", "Unknown")
+        title = prospect.get("current_title") or prospect.get("headline", "N/A")
+        location = prospect.get("location", "N/A")
+
+        prompt = (
+            f"Search the web for information about {name}, who works at {company} "
+            f"as {title} in {location}.\n\n"
+            "Find:\n"
+            "1. Company website URL\n"
+            "2. Company size (employees count)\n"
+            "3. Company industry/sector\n"
+            "4. Company funding (if startup — recent rounds, total raised)\n"
+            "5. Short company description (1-2 sentences)\n"
+            "6. Recent news about the person or company (last 12 months)\n"
+            "7. Technologies/tools the company uses\n"
+            "8. Person's social media presence beyond LinkedIn\n\n"
+            "Return ONLY a JSON object with these fields:\n"
+            "{company_website, company_size, company_industry, company_funding, "
+            "company_description, recent_news: [], technologies: [], social_presence}\n\n"
+            "If info not found, use empty string or empty array."
+        )
+
+        try:
+            raw = await asyncio.wait_for(
+                _call_claude(prompt, system=self._WEB_RESEARCH_SYSTEM),
+                timeout=60,
+            )
+        except asyncio.TimeoutError:
+            logger.warning("Web research timed out for %s @ %s", name, company)
+            return self._empty_web_research()
+        except Exception:
+            logger.error("Web research failed for %s @ %s:", name, company, exc_info=True)
+            return self._empty_web_research()
+
+        return self._parse_web_research(raw, prospect)
+
+    def _empty_web_research(self) -> dict:
+        """Return a blank web-research result dict."""
+        return {k: ([] if isinstance(v, list) else "") for k, v in self._WEB_RESEARCH_FIELDS.items()}
+
+    def _parse_web_research(self, raw: str, prospect: dict) -> dict:
+        """Extract web-research JSON from Claude's response, with fallbacks."""
+        # Direct parse
+        try:
+            result = json.loads(raw.strip())
+            if isinstance(result, dict):
+                return self._validate_web_research(result)
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+        # Extract from markdown code block
+        json_match = re.search(r"```(?:json)?\s*\n?(.*?)\n?```", raw, re.DOTALL)
+        if json_match:
+            try:
+                result = json.loads(json_match.group(1).strip())
+                if isinstance(result, dict):
+                    return self._validate_web_research(result)
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+        # Find any JSON object in the text
+        brace_match = re.search(r"\{[\s\S]*\}", raw)
+        if brace_match:
+            try:
+                result = json.loads(brace_match.group(0))
+                if isinstance(result, dict):
+                    return self._validate_web_research(result)
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+        logger.warning(
+            "Could not parse web research response for %s, using empty. Raw length=%d",
+            prospect.get("full_name", "?"), len(raw),
+        )
+        return self._empty_web_research()
+
+    def _validate_web_research(self, result: dict) -> dict:
+        """Normalise web-research dict to expected types."""
+        validated: dict = {}
+        for key, default in self._WEB_RESEARCH_FIELDS.items():
+            val = result.get(key, default)
+            if isinstance(default, list):
+                if isinstance(val, list):
+                    validated[key] = [str(v) for v in val]
+                elif isinstance(val, str) and val:
+                    validated[key] = [val]
+                else:
+                    validated[key] = []
+            else:
+                validated[key] = str(val) if val else ""
+        validated["researched_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         return validated

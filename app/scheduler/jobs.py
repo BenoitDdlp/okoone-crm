@@ -10,8 +10,10 @@ Architecture: Claude = brain, Patchright = hands.
 - Failure detection: alerts when scraping yields 0 results
 """
 
+import asyncio
 import json
 import logging
+import random
 import traceback
 from datetime import datetime
 
@@ -148,59 +150,72 @@ async def run_research_loop() -> None:
             # --- Step 4.5: Deep screening (fetch full profiles) ---
             LOOP_STATE["status"] = "evaluating"
             deep_screened = 0
-            # Get prospects that have no experience data yet
-            shallow_cursor = await db.execute(
-                "SELECT id, linkedin_username FROM prospects "
-                "WHERE (experience_json IS NULL OR experience_json = '' OR experience_json = '[]') "
-                "AND linkedin_username IS NOT NULL "
-                "ORDER BY created_at DESC LIMIT 10"
-            )
-            shallow_prospects = await shallow_cursor.fetchall()
-            logger.info("DEEP SCREEN: %d prospects need full profile fetch", len(shallow_prospects))
 
-            for i, sp in enumerate(shallow_prospects):
-                pid, username = sp[0], sp[1]
-                LOOP_STATE["current_step"] = f"Deep screening {i+1}/{len(shallow_prospects)}: {username}..."
-                try:
-                    profile = await _scraper.get_person_profile(username)
-                    if profile:
-                        update_data = {}
-                        if profile.get("full_name"):
-                            update_data["full_name"] = profile["full_name"]
-                        if profile.get("headline"):
-                            update_data["headline"] = profile["headline"]
-                        if profile.get("location"):
-                            update_data["location"] = profile["location"]
-                        if profile.get("about"):
-                            update_data["about_text"] = profile["about"]
-                        if profile.get("current_company"):
-                            update_data["current_company"] = profile["current_company"]
-                        if profile.get("current_title"):
-                            update_data["current_title"] = profile["current_title"]
-                        if profile.get("experience"):
-                            update_data["experience_json"] = json.dumps(profile["experience"])
-                        if profile.get("education"):
-                            update_data["education_json"] = json.dumps(profile["education"])
-                        if profile.get("skills"):
-                            update_data["skills_json"] = json.dumps(profile["skills"])
-                        if profile.get("profile_photo_url"):
-                            update_data["profile_photo_url"] = profile["profile_photo_url"]
-                        update_data["screened_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            if session_valid:
+                # Get prospects that have no experience data yet
+                shallow_cursor = await db.execute(
+                    "SELECT id, linkedin_username FROM prospects "
+                    "WHERE (experience_json IS NULL OR experience_json = '' OR experience_json = '[]') "
+                    "AND linkedin_username IS NOT NULL "
+                    "ORDER BY created_at DESC LIMIT 20"
+                )
+                shallow_prospects = await shallow_cursor.fetchall()
+                logger.info("DEEP SCREEN: %d prospects need full profile fetch", len(shallow_prospects))
 
-                        if update_data:
-                            await repo.update(pid, update_data)
-                            deep_screened += 1
-                            logger.info("DEEP SCREEN [%d] %s → %s @ %s",
-                                        pid, profile.get("full_name", "?"),
-                                        profile.get("current_title", "?"),
-                                        profile.get("current_company", "?"))
-                except DailyLimitReached:
-                    logger.warning("DEEP SCREEN rate limit reached after %d profiles", deep_screened)
-                    break
-                except Exception:
-                    logger.error("DEEP SCREEN ERROR for %s:", username, exc_info=True)
-            await db.commit()
-            logger.info("DEEP SCREEN complete: %d profiles enriched", deep_screened)
+                for i, sp in enumerate(shallow_prospects):
+                    # Human-like pause between profile visits
+                    if i > 0:
+                        pause = random.uniform(3, 8)
+                        # Occasionally (20% chance) take a longer break like a human reading
+                        if random.random() < 0.2:
+                            pause = random.uniform(15, 30)
+                            logger.info("DEEP SCREEN: taking a human-like reading break (%.0fs)", pause)
+                        await asyncio.sleep(pause)
+
+                    pid, username = sp[0], sp[1]
+                    LOOP_STATE["current_step"] = f"Deep screening {i+1}/{len(shallow_prospects)}: {username}..."
+                    try:
+                        profile = await _scraper.get_person_profile(username)
+                        if profile:
+                            update_data = {}
+                            if profile.get("full_name"):
+                                update_data["full_name"] = profile["full_name"]
+                            if profile.get("headline"):
+                                update_data["headline"] = profile["headline"]
+                            if profile.get("location"):
+                                update_data["location"] = profile["location"]
+                            if profile.get("about"):
+                                update_data["about_text"] = profile["about"]
+                            if profile.get("current_company"):
+                                update_data["current_company"] = profile["current_company"]
+                            if profile.get("current_title"):
+                                update_data["current_title"] = profile["current_title"]
+                            if profile.get("experience"):
+                                update_data["experience_json"] = json.dumps(profile["experience"])
+                            if profile.get("education"):
+                                update_data["education_json"] = json.dumps(profile["education"])
+                            if profile.get("skills"):
+                                update_data["skills_json"] = json.dumps(profile["skills"])
+                            if profile.get("profile_photo_url"):
+                                update_data["profile_photo_url"] = profile["profile_photo_url"]
+                            update_data["screened_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+                            if update_data:
+                                await repo.update(pid, update_data)
+                                deep_screened += 1
+                                logger.info("DEEP SCREEN [%d] %s → %s @ %s",
+                                            pid, profile.get("full_name", "?"),
+                                            profile.get("current_title", "?"),
+                                            profile.get("current_company", "?"))
+                    except DailyLimitReached:
+                        logger.warning("DEEP SCREEN rate limit reached after %d profiles", deep_screened)
+                        break
+                    except Exception:
+                        logger.error("DEEP SCREEN ERROR for %s:", username, exc_info=True)
+                await db.commit()
+                logger.info("DEEP SCREEN complete: %d profiles enriched", deep_screened)
+            else:
+                logger.info("DEEP SCREEN SKIPPED (session expired)")
 
             # --- Step 5: Score new prospects ---
             LOOP_STATE["current_step"] = f"{total_new} nouveaux + {deep_screened} enrichis. Scoring..."
@@ -276,6 +291,45 @@ async def run_research_loop() -> None:
             except Exception:
                 logger.error("DEEP ANALYSIS step failed:", exc_info=True)
             logger.info("DEEP ANALYSIS complete: %d prospects analyzed", analyzed)
+
+            # --- Step 5.6: Web research enrichment ---
+            LOOP_STATE["current_step"] = "Recherche web sur les prospects enrichis..."
+            web_researched = 0
+            try:
+                from app.services.deep_analysis_service import DeepAnalysisService as _DS
+
+                web_svc = _DS()
+                wr_cursor = await db.execute(
+                    "SELECT id FROM prospects "
+                    "WHERE experience_json IS NOT NULL AND experience_json != '' AND experience_json != '[]' "
+                    "AND (web_research_json IS NULL OR web_research_json = '') "
+                    "ORDER BY relevance_score DESC LIMIT 5"
+                )
+                wr_ids = [row[0] for row in await wr_cursor.fetchall()]
+
+                for i, pid in enumerate(wr_ids):
+                    LOOP_STATE["current_step"] = f"Web research {i+1}/{len(wr_ids)}..."
+                    prospect = await repo.find_by_id(pid)
+                    if not prospect:
+                        continue
+                    try:
+                        wr_result = await web_svc.web_research_prospect(prospect)
+                        await repo.update(pid, {
+                            "web_research_json": json.dumps(wr_result, ensure_ascii=False),
+                        })
+                        web_researched += 1
+                        logger.info(
+                            "WEB RESEARCH [%d] %s → website=%s industry=%s",
+                            pid, prospect.get("full_name", "?"),
+                            wr_result.get("company_website", ""),
+                            wr_result.get("company_industry", ""),
+                        )
+                    except Exception:
+                        logger.error("WEB RESEARCH ERROR for prospect %d:", pid, exc_info=True)
+                await db.commit()
+            except Exception:
+                logger.error("WEB RESEARCH step failed:", exc_info=True)
+            logger.info("WEB RESEARCH complete: %d prospects enriched", web_researched)
 
             # --- Step 6: Compute cycle metrics ---
             LOOP_STATE["current_step"] = "Calcul des metriques du cycle..."

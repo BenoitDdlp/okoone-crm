@@ -538,6 +538,15 @@ class LinkedInScraper:
 
         await self._rate_limiter.acquire("profile")
 
+        # Human-like pre-navigation pause
+        await asyncio.sleep(random.uniform(2, 5))
+
+        # Occasionally (1 in 5 calls), add a long pause to simulate distraction
+        if random.random() < 0.2:
+            long_pause = random.uniform(15, 30)
+            logger.info("Human-like long pause: %.1fs", long_pause)
+            await asyncio.sleep(long_pause)
+
         url = f"https://www.linkedin.com/in/{quote(username, safe='')}/"
         logger.info("Fetching LinkedIn profile: %s", username)
         await self._page.goto(url, wait_until="domcontentloaded")
@@ -914,6 +923,9 @@ class LinkedInScraper:
             return result;
         }""", username)
 
+        # Human-like post-extraction pause
+        await asyncio.sleep(random.uniform(1, 3))
+
         # Log extraction results for each field
         logger.info("Extracted profile for %s (%s)", profile.get("full_name", "?"), username)
         logger.info("  headline: %s", (profile.get("headline") or "")[:80])
@@ -1096,8 +1108,8 @@ class LinkedInScraper:
         scroll_count = random.randint(2, 4)
         for _ in range(scroll_count):
             await self._page.mouse.wheel(0, random.randint(200, 500))
-            await asyncio.sleep(random.uniform(0.5, 1.5))
+            await asyncio.sleep(random.uniform(1.0, 3.0))
         # Occasionally scroll back up a tiny bit
         if random.random() < 0.3:
             await self._page.mouse.wheel(0, -random.randint(50, 150))
-            await asyncio.sleep(random.uniform(0.3, 0.7))
+            await asyncio.sleep(random.uniform(0.5, 1.5))

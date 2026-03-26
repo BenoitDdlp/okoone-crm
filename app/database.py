@@ -336,6 +336,12 @@ async def init_db() -> None:
         except Exception:
             pass  # column already exists
 
+        # Migration: add web_research_json column for web-enriched prospect data
+        try:
+            await db.execute("ALTER TABLE prospects ADD COLUMN web_research_json TEXT")
+        except Exception:
+            pass  # column already exists
+
         existing = await db.execute_fetchall(
             "SELECT id FROM scoring_weights WHERE name = 'default'"
         )

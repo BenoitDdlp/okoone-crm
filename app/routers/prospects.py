@@ -290,12 +290,20 @@ async def review_prospect(
                         score_breakdown = json.loads(next_p["score_breakdown"])
                     except (json.JSONDecodeError, TypeError):
                         pass
+                claude_analysis = None
+                if next_p.get("claude_analysis"):
+                    try:
+                        parsed_ca = json.loads(next_p["claude_analysis"])
+                        if isinstance(parsed_ca, dict):
+                            claude_analysis = parsed_ca
+                    except (json.JSONDecodeError, TypeError):
+                        pass
 
                 return HTMLResponse(
                     templates.env.get_template("partials/review_card.html").render(
                         {"request": request, "prospect": next_p, "experiences": experiences,
                          "education": education, "skills": skills, "traits": traits,
-                         "score_breakdown": score_breakdown}
+                         "score_breakdown": score_breakdown, "claude_analysis": claude_analysis}
                     )
                 )
             else:
@@ -305,6 +313,156 @@ async def review_prospect(
                 </div>""")
 
     return updated
+
+
+@router.post("/{prospect_id}/deep-screen")
+async def deep_screen_single(request: Request, prospect_id: int):
+    """Deep screen a single prospect: scrape LinkedIn profile, update DB, re-score."""
+    import logging
+    logger = logging.getLogger("okoone.deep_screen")
+    scraper = request.app.state.scraper
+
+    if not scraper:
+        raise HTTPException(status_code=503, detail="Scraper non initialise")
+
+    if not scraper._browser:
+        await scraper.start()
+
+    if not await scraper.is_session_valid():
+        raise HTTPException(status_code=503, detail="Session LinkedIn expiree")
+
+    async with get_db() as db:
+        repo = ProspectRepository(db)
+        prospect = await repo.find_by_id(prospect_id)
+        if not prospect:
+            raise HTTPException(status_code=404, detail="Prospect introuvable")
+
+        username = prospect.get("linkedin_username")
+        if not username:
+            raise HTTPException(
+                status_code=422,
+                detail="Prospect sans linkedin_username — impossible de scraper.",
+            )
+
+        try:
+            profile = await scraper.get_person_profile(username)
+        except Exception as e:
+            logger.error("Deep screen error for %s: %s", username, str(e)[:200])
+            raise HTTPException(
+                status_code=502,
+                detail=f"Erreur scraping LinkedIn: {str(e)[:200]}",
+            )
+
+        if not profile:
+            raise HTTPException(status_code=502, detail="Profil LinkedIn vide")
+
+        update_data: dict = {
+            "screened_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+        }
+        for k, db_k in [
+            ("full_name", "full_name"),
+            ("headline", "headline"),
+            ("location", "location"),
+            ("about", "about_text"),
+            ("current_company", "current_company"),
+            ("current_title", "current_title"),
+            ("profile_photo_url", "profile_photo_url"),
+        ]:
+            if profile.get(k):
+                update_data[db_k] = profile[k]
+        for k in ("experience", "education", "skills"):
+            if profile.get(k):
+                update_data[f"{k}_json"] = json.dumps(profile[k])
+
+        await repo.update(prospect_id, update_data)
+        await db.commit()
+
+        logger.info(
+            "Deep screened %s: %s @ %s",
+            username,
+            profile.get("full_name"),
+            profile.get("current_company"),
+        )
+
+    # Re-score the prospect with updated data
+    try:
+        from app.services.prospect_service import ProspectService
+        from app.services.scoring_service import ScoringService
+
+        async with get_db() as db:
+            repo = ProspectRepository(db)
+            scoring = ScoringService()
+            svc = ProspectService(repo, scoring)
+            new_score = await svc.score_prospect(prospect_id)
+            await db.commit()
+            updated = await repo.find_by_id(prospect_id)
+    except Exception as e:
+        logger.warning("Re-scoring failed for prospect %d: %s", prospect_id, str(e)[:100])
+        async with get_db() as db:
+            repo = ProspectRepository(db)
+            updated = await repo.find_by_id(prospect_id)
+
+    # Web research enrichment (best-effort, don't block the response)
+    try:
+        from app.services.deep_analysis_service import DeepAnalysisService
+
+        async with get_db() as db:
+            repo = ProspectRepository(db)
+            fresh = await repo.find_by_id(prospect_id)
+            if fresh and not fresh.get("web_research_json"):
+                wr_svc = DeepAnalysisService()
+                wr_result = await wr_svc.web_research_prospect(fresh)
+                await repo.update(prospect_id, {
+                    "web_research_json": json.dumps(wr_result, ensure_ascii=False),
+                })
+                await db.commit()
+                updated = await repo.find_by_id(prospect_id)
+                logger.info("Web research completed for prospect %d", prospect_id)
+    except Exception as e:
+        logger.warning("Web research failed for prospect %d: %s", prospect_id, str(e)[:100])
+
+    return updated
+
+
+@router.post("/{prospect_id}/web-research")
+async def web_research_single(prospect_id: int):
+    """Run web research enrichment on a single prospect.
+
+    Uses Claude CLI with web search to gather company info, funding,
+    technologies, news, and social presence beyond LinkedIn.
+    """
+    async with get_db() as db:
+        repo = ProspectRepository(db)
+        prospect = await repo.find_by_id(prospect_id)
+        if not prospect:
+            raise HTTPException(status_code=404, detail="Prospect introuvable")
+
+        has_experience = (
+            prospect.get("experience_json")
+            and prospect["experience_json"] not in ("", "[]")
+        )
+        if not has_experience:
+            raise HTTPException(
+                status_code=422,
+                detail="Prospect sans donnees d'experience. Lance un deep screen d'abord.",
+            )
+
+        from app.services.deep_analysis_service import DeepAnalysisService
+
+        svc = DeepAnalysisService()
+        try:
+            result = await svc.web_research_prospect(prospect)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Erreur web research: {str(exc)[:200]}",
+            )
+
+        await repo.update(prospect_id, {
+            "web_research_json": json.dumps(result, ensure_ascii=False),
+        })
+
+        return result
 
 
 @router.post("/deep-screen-all")
