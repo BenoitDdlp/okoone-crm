@@ -284,12 +284,48 @@ class LinkedInScraper:
             logger.info("  [%d] %s — %s (%s)", i, r.get("full_name"), r.get("headline", "")[:50], r.get("profile_username"))
 
         if not results:
-            # Fallback: try to extract from visible text
+            # Fallback: parse from visible text + href links (same approach as LinkedIn MCP)
+            logger.info("JS selector found 0, trying text+links fallback...")
             try:
                 visible = await self._page.inner_text("body")
-                logger.warning("0 results via JS. Visible text: %s", visible[:500].replace("\n", " | "))
+                logger.info("Visible text (500 chars): %s", visible[:500].replace("\n", " | "))
+
+                # Extract all /in/ links from the page
+                all_links = await self._page.evaluate("""() => {
+                    return Array.from(document.querySelectorAll('a[href*="/in/"]'))
+                        .map(a => ({href: a.href, text: a.textContent.trim()}))
+                        .filter(a => a.text.length > 0 && !a.text.includes('Premium'));
+                }""")
+                logger.info("Found %d profile links via fallback", len(all_links))
+
+                seen = set()
+                for link in all_links:
+                    import re as _re
+                    m = _re.search(r"/in/([^/?]+)", link.get("href", ""))
+                    if not m:
+                        continue
+                    username = m.group(1)
+                    if username in seen:
+                        continue
+                    seen.add(username)
+
+                    # Parse name from link text
+                    name = link.get("text", "").split("\n")[0].strip()
+                    name = _re.sub(r"View .+'s profile$", "", name).strip()
+                    if not name or len(name) < 2:
+                        continue
+
+                    results.append({
+                        "full_name": name,
+                        "headline": "",
+                        "location": "",
+                        "linkedin_url": f"https://www.linkedin.com/in/{username}/",
+                        "profile_username": username,
+                    })
+
+                logger.info("Fallback extracted %d results", len(results))
             except Exception:
-                pass
+                logger.error("Fallback extraction failed", exc_info=True)
 
         return results
 
