@@ -214,6 +214,9 @@ class LinkedInScraper:
         results = await self._page.evaluate("""() => {
             const cards = document.querySelectorAll('[data-view-name="search-entity-result-universal-template"]');
             const results = [];
+            const SKIP = ['Status is online', 'Status is offline', 'Status is reachable',
+                          'Connect', 'Follow', 'Message', 'Pending', 'Send InMail'];
+
             for (const card of cards) {
                 const link = card.querySelector('a[href*="/in/"]');
                 if (!link) continue;
@@ -221,37 +224,57 @@ class LinkedInScraper:
                 const usernameMatch = href.match(/\\/in\\/([^/?]+)/);
                 if (!usernameMatch) continue;
 
-                // Get all text content from the card
+                // Get the name from the link's aria-label or span[aria-hidden="true"]
+                let name = '';
+                const ariaLabel = link.getAttribute('aria-label');
+                if (ariaLabel) {
+                    name = ariaLabel.replace(/View .+'s profile$/, '').replace(/'s profile$/, '').trim();
+                }
+                if (!name) {
+                    const hiddenSpan = link.querySelector('span[aria-hidden="true"]');
+                    if (hiddenSpan) name = hiddenSpan.textContent.trim();
+                }
+
+                // Collect meaningful text spans (skip status/buttons)
                 const texts = [];
                 card.querySelectorAll('span').forEach(s => {
                     const t = s.textContent.trim();
-                    if (t && t.length > 1 && t.length < 200) texts.push(t);
+                    if (t && t.length > 2 && t.length < 200
+                        && !SKIP.includes(t)
+                        && !t.startsWith('View ')
+                        && !t.includes("'s profile")
+                        && t !== name) {
+                        texts.push(t);
+                    }
                 });
 
-                // First meaningful text is usually the name
-                const name = texts[0] || '';
-                // Find headline (usually after connection degree indicator)
+                // Headline is usually the first text after name
+                // Location is after connection degree
                 let headline = '';
                 let location = '';
-                for (let i = 1; i < texts.length; i++) {
-                    const t = texts[i];
-                    if (t.includes('1st') || t.includes('2nd') || t.includes('3rd')) continue;
-                    if (t === 'Connect' || t === 'Follow' || t === 'Message') continue;
-                    if (!headline && t.length > 5) {
+                let pastDegree = false;
+                for (const t of texts) {
+                    if (/^\\d+(st|nd|rd|th)$/.test(t) || t.includes('1st') || t.includes('2nd') || t.includes('3rd')) {
+                        pastDegree = true;
+                        continue;
+                    }
+                    if (!headline) {
                         headline = t;
-                    } else if (!location && t.length > 2 && headline) {
+                    } else if (pastDegree && !location && t.length > 2) {
                         location = t;
                         break;
                     }
                 }
 
-                results.push({
-                    full_name: name,
-                    headline: headline,
-                    location: location,
-                    linkedin_url: 'https://www.linkedin.com/in/' + usernameMatch[1] + '/',
-                    profile_username: usernameMatch[1],
-                });
+                if (name) {
+                    results.push({
+                        full_name: name,
+                        headline: headline,
+                        location: location,
+                        linkedin_url: 'https://www.linkedin.com/in/' + usernameMatch[1] + '/',
+                        profile_username: usernameMatch[1],
+                    });
+                }
             }
             return results;
         }""")
