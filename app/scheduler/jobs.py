@@ -222,7 +222,7 @@ async def run_research_loop() -> None:
                     prospect = await repo.find_by_id(pid)
                     if prospect:
                         score, breakdown = await scoring.score_prospect(prospect, weights)
-                        summary = scoring.generate_score_summary(breakdown, weights)
+                        summary = scoring.generate_score_summary(breakdown, weights, prospect)
                         await repo.update(pid, {
                             "relevance_score": score,
                             "score_breakdown": json.dumps(breakdown),

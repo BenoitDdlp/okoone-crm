@@ -143,31 +143,20 @@ class ScoringService:
     # Score summary
     # ------------------------------------------------------------------
 
-    CRITERION_LABELS: dict[str, tuple[str, str]] = {
-        "title_match": ("Titre decision-maker", "Titre non-cible"),
-        "company_fit": ("Entreprise tech/startup", "Entreprise hors-cible"),
-        "seniority": ("Seniority C-level/VP", "Seniority trop junior"),
-        "industry": ("Secteur tech/digital", "Secteur non-tech"),
-        "location": ("Localisation Singapore/SEA", "Localisation eloignee"),
-        "completeness": ("Profil complet", "Profil incomplet"),
-        "activity": ("Profil actif", "Profil inactif"),
-    }
-
-    def generate_score_summary(self, breakdown: dict, weights: dict) -> str:
-        """Generate a short pro/con summary from the score breakdown."""
+    def generate_score_summary(self, breakdown: dict, weights: dict, prospect: dict | None = None) -> str:
+        """Generate a short pro/con summary with 5-word max human insights."""
         pros: list[str] = []
         cons: list[str] = []
-        mid: list[str] = []
+        mid: list[tuple[str, float]] = []
 
         for key, value in breakdown.items():
-            labels = self.CRITERION_LABELS.get(key)
-            if not labels:
+            insight = self._insight_for(key, value, prospect or {})
+            if not insight:
                 continue
-            pos_label, neg_label = labels
             if value >= 0.7:
-                pros.append(f"+ {pos_label} ({value})")
+                pros.append(f"+ {insight}")
             elif value <= 0.3:
-                cons.append(f"- {neg_label} ({value})")
+                cons.append(f"- {insight}")
             else:
                 mid.append((key, value))
 
@@ -178,16 +167,76 @@ class ScoringService:
             for key, value in mid:
                 if len(lines) >= 3:
                     break
-                labels = self.CRITERION_LABELS.get(key)
-                if not labels:
+                insight = self._insight_for(key, value, prospect or {})
+                if not insight:
                     continue
-                pos_label, neg_label = labels
                 if value >= 0.5:
-                    lines.append(f"+ {pos_label} ({value})")
+                    lines.append(f"+ {insight}")
                 else:
-                    lines.append(f"- {neg_label} ({value})")
+                    lines.append(f"- {insight}")
 
         return "\n".join(lines)
+
+    @staticmethod
+    def _insight_for(key: str, value: float, prospect: dict) -> str:
+        """Return a concise 5-word-max human insight for a criterion."""
+        title = (prospect.get("current_title") or prospect.get("headline") or "").strip()
+        company = (prospect.get("current_company") or "").strip()
+        location = (prospect.get("location") or "").strip()
+
+        if key == "title_match":
+            if value >= 0.7:
+                short = title[:30] if title else "Strong"
+                return f"{short} decision maker"
+            if value >= 0.4:
+                return "Moderate title relevance"
+            return "Non-target job title"
+
+        if key == "company_fit":
+            if value >= 0.7:
+                short = company[:25] if company else "Tech/startup"
+                return f"{short} tech company"
+            if value >= 0.4:
+                return "Average company fit"
+            return "Unknown small company"
+
+        if key == "seniority":
+            if value >= 0.7:
+                return "CTO/VP level leader"
+            if value >= 0.4:
+                return "Mid-level seniority"
+            return "Too junior for outreach"
+
+        if key == "industry":
+            if value >= 0.7:
+                return "Strong tech industry match"
+            if value >= 0.4:
+                return "Partial industry relevance"
+            return "Low industry relevance"
+
+        if key == "location":
+            if value >= 0.7:
+                loc_short = location[:20] if location else "SEA"
+                return f"{loc_short} prime location"
+            if value >= 0.4:
+                return "APAC region location"
+            return "Remote or distant location"
+
+        if key == "completeness":
+            if value >= 0.7:
+                return "Rich complete profile"
+            if value >= 0.4:
+                return "Partially complete profile"
+            return "No email or contact info"
+
+        if key == "activity":
+            if value >= 0.7:
+                return "Active engaged profile"
+            if value >= 0.4:
+                return "Moderate profile activity"
+            return "Inactive or sparse profile"
+
+        return ""
 
     # ------------------------------------------------------------------
     # Individual scoring functions — each returns 0.0..1.0

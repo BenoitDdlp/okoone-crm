@@ -12,7 +12,15 @@
 </div>
 
 <!-- Stats -->
-<div class="stats-row" id="pipeline-stats">
+<div
+  class="stats-row"
+  id="pipeline-stats"
+  hx-get="/prospects"
+  hx-select="#pipeline-stats"
+  hx-target="#pipeline-stats"
+  hx-swap="outerHTML"
+  hx-trigger="reviewDone from:body"
+>
   <div class="stat-box">
     <div class="stat-num">{{ stats.total|default(0) }}</div>
     <div class="stat-label">Total</div>
@@ -77,7 +85,16 @@
 {% endif %}
 
 <!-- Prospects table -->
-<div class="section-card" style="margin-top: 2rem">
+<div
+  class="section-card"
+  id="prospects-table"
+  style="margin-top: 2rem"
+  hx-get="/prospects"
+  hx-select="#prospects-table"
+  hx-target="#prospects-table"
+  hx-swap="outerHTML"
+  hx-trigger="reviewDone from:body"
+>
   <h2 class="section-card-title">Tous les prospects</h2>
   <p class="section-desc">
     Liste complete de tous les prospects. Clique pour voir le detail.

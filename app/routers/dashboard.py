@@ -48,6 +48,7 @@ async def pipeline(request: Request, page: int = 1):
 
         experiences = []
         education = []
+        skills = []
         traits = []
         score_breakdown: Optional[dict] = None
         if prospect:
@@ -59,6 +60,11 @@ async def pipeline(request: Request, page: int = 1):
             if prospect.get("education_json"):
                 try:
                     education = json.loads(prospect["education_json"])
+                except (json.JSONDecodeError, TypeError):
+                    pass
+            if prospect.get("skills_json"):
+                try:
+                    skills = json.loads(prospect["skills_json"])
                 except (json.JSONDecodeError, TypeError):
                     pass
             if prospect.get("traits_json"):
@@ -102,6 +108,7 @@ async def pipeline(request: Request, page: int = 1):
             "prospect": prospect,
             "experiences": experiences,
             "education": education,
+            "skills": skills,
             "traits": traits,
             "score_breakdown": score_breakdown,
             "recent_decisions": recent_decisions,

@@ -113,7 +113,7 @@ class ProspectService:
         weights = await self._get_active_weights()
 
         score, breakdown = await self.scoring.score_prospect(prospect, weights)
-        summary = self.scoring.generate_score_summary(breakdown, weights)
+        summary = self.scoring.generate_score_summary(breakdown, weights, prospect)
 
         await self.repo.update(
             prospect_id,

@@ -246,56 +246,63 @@ async def review_prospect(
 
         updated = await repo.find_by_id(prospect_id)
 
-    # For htmx: return the next review card (pipeline flow)
-    is_htmx = request.headers.get("HX-Request") == "true"
-    if is_htmx:
-        # Fetch next unreviewed prospect
-        cursor = await db.execute("""
-            SELECT p.* FROM prospects p
-            LEFT JOIN human_reviews hr ON hr.prospect_id = p.id
-            WHERE hr.id IS NULL AND p.status NOT IN ('rejected', 'converted')
-            ORDER BY p.relevance_score DESC LIMIT 1
-        """)
-        next_row = await cursor.fetchone()
+        # For htmx: return the next review card (pipeline flow)
+        is_htmx = request.headers.get("HX-Request") == "true"
+        if is_htmx:
+            # Fetch next unreviewed prospect
+            cursor = await db.execute("""
+                SELECT p.* FROM prospects p
+                LEFT JOIN human_reviews hr ON hr.prospect_id = p.id
+                WHERE hr.id IS NULL AND p.status NOT IN ('rejected', 'converted')
+                ORDER BY p.relevance_score DESC LIMIT 1
+            """)
+            next_row = await cursor.fetchone()
 
-        if next_row:
-            next_p = dict(next_row)
-            experiences = []
-            education = []
-            traits = []
-            score_breakdown = {}
-            if next_p.get("experience_json"):
-                try:
-                    experiences = json.loads(next_p["experience_json"])
-                except (json.JSONDecodeError, TypeError):
-                    pass
-            if next_p.get("education_json"):
-                try:
-                    education = json.loads(next_p["education_json"])
-                except (json.JSONDecodeError, TypeError):
-                    pass
-            if next_p.get("traits_json"):
-                try:
-                    traits = json.loads(next_p["traits_json"])
-                except (json.JSONDecodeError, TypeError):
-                    pass
-            if next_p.get("score_breakdown"):
-                try:
-                    score_breakdown = json.loads(next_p["score_breakdown"])
-                except (json.JSONDecodeError, TypeError):
-                    pass
+            if next_row:
+                next_p = dict(next_row)
+                experiences = []
+                education = []
+                skills = []
+                traits = []
+                score_breakdown = {}
+                if next_p.get("experience_json"):
+                    try:
+                        experiences = json.loads(next_p["experience_json"])
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+                if next_p.get("education_json"):
+                    try:
+                        education = json.loads(next_p["education_json"])
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+                if next_p.get("skills_json"):
+                    try:
+                        skills = json.loads(next_p["skills_json"])
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+                if next_p.get("traits_json"):
+                    try:
+                        traits = json.loads(next_p["traits_json"])
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+                if next_p.get("score_breakdown"):
+                    try:
+                        score_breakdown = json.loads(next_p["score_breakdown"])
+                    except (json.JSONDecodeError, TypeError):
+                        pass
 
-            return HTMLResponse(
-                templates.env.get_template("partials/review_card.html").render(
-                    {"request": request, "prospect": next_p, "experiences": experiences,
-                     "education": education, "traits": traits, "score_breakdown": score_breakdown}
+                return HTMLResponse(
+                    templates.env.get_template("partials/review_card.html").render(
+                        {"request": request, "prospect": next_p, "experiences": experiences,
+                         "education": education, "skills": skills, "traits": traits,
+                         "score_breakdown": score_breakdown}
+                    )
                 )
-            )
-        else:
-            return HTMLResponse("""<div class="empty-state">
-                <div class="empty-icon">&#10003;</div>
-                <p>Tous les prospects ont ete qualifies. Lance un nouveau cycle depuis la page Strategie.</p>
-            </div>""")
+            else:
+                return HTMLResponse("""<div class="empty-state">
+                    <div class="empty-icon">&#10003;</div>
+                    <p>Tous les prospects ont ete qualifies. Lance un nouveau cycle depuis la page Strategie.</p>
+                </div>""")
 
     return updated
 
