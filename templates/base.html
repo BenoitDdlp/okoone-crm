@@ -1,74 +1,88 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="fr">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{% block title %}Okoone CRM{% endblock %}</title>
-  <link rel="stylesheet" href="/static/style.css">
-  <script src="https://unpkg.com/htmx.org@2.0.4"></script>
-  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3/dist/cdn.min.js"></script>
-</head>
-<body>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{% block title %}Okoone CRM{% endblock %}</title>
+    <link rel="stylesheet" href="/static/style.css?v=6" />
+    <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+    <script
+      defer
+      src="https://cdn.jsdelivr.net/npm/alpinejs@3/dist/cdn.min.js"
+    ></script>
+  </head>
+  <body>
+    <div class="shell">
+      <aside class="sidebar">
+        <div class="sidebar-logo">Okoone</div>
+        <nav class="sidebar-nav">
+          <a
+            href="/prospects"
+            class="{{ 'active' if active_nav == 'pipeline' else '' }}"
+          >
+            <span class="nav-icon">&#9678;</span> Pipeline {% if pending_count
+            %}<span class="nav-badge">{{ pending_count }}</span>{% endif %}
+          </a>
+          <a
+            href="/strategy"
+            class="{{ 'active' if active_nav == 'strategy' else '' }}"
+          >
+            <span class="nav-icon">&#9881;</span> Strategie
+          </a>
+          <a
+            href="/campaigns"
+            class="{{ 'active' if active_nav == 'outreach' else '' }}"
+          >
+            <span class="nav-icon">&#9993;</span> Outreach
+          </a>
+        </nav>
+        <div class="sidebar-bottom">
+          <a href="/logout">Deconnexion</a>
+        </div>
+      </aside>
 
-<div class="shell">
-  <aside class="sidebar">
-    <div class="sidebar-logo">Okoone</div>
-    <nav class="sidebar-nav">
-      <a href="/prospects" class="{{ 'active' if active_nav == 'pipeline' else '' }}">
-        <span class="nav-icon">&#9678;</span> Pipeline
-        {% if pending_count %}<span class="nav-badge">{{ pending_count }}</span>{% endif %}
-      </a>
-      <a href="/strategy" class="{{ 'active' if active_nav == 'strategy' else '' }}">
-        <span class="nav-icon">&#9881;</span> Strategie
-      </a>
-      <a href="/campaigns" class="{{ 'active' if active_nav == 'outreach' else '' }}">
-        <span class="nav-icon">&#9993;</span> Outreach
-      </a>
-    </nav>
-    <div class="sidebar-bottom">
-      <a href="/logout">Deconnexion</a>
+      <main class="main-content">{% block content %}{% endblock %}</main>
     </div>
-  </aside>
 
-  <main class="main-content">
-    {% block content %}{% endblock %}
-  </main>
-</div>
+    <!-- Toast container -->
+    <div class="toast-container" id="toasts"></div>
 
-<!-- Toast container -->
-<div class="toast-container" id="toasts"></div>
+    <script>
+      function showToast(message, type) {
+        type = type || "info";
+        var container = document.getElementById("toasts");
+        var toast = document.createElement("div");
+        toast.className = "toast " + type;
+        toast.textContent = message;
+        container.appendChild(toast);
+        setTimeout(function () {
+          toast.remove();
+        }, 3200);
+      }
 
-<script>
-function showToast(message, type) {
-  type = type || 'info';
-  var container = document.getElementById('toasts');
-  var toast = document.createElement('div');
-  toast.className = 'toast ' + type;
-  toast.textContent = message;
-  container.appendChild(toast);
-  setTimeout(function() { toast.remove(); }, 3200);
-}
+      // Auto-toast on htmx responses
+      document.addEventListener("htmx:afterRequest", function (e) {
+        var trigger = e.detail.elt;
+        var status = e.detail.xhr ? e.detail.xhr.status : 0;
+        var msg = trigger.getAttribute("data-toast");
+        if (msg) {
+          showToast(msg, status >= 200 && status < 400 ? "success" : "error");
+        }
+      });
 
-// Auto-toast on htmx responses
-document.addEventListener('htmx:afterRequest', function(e) {
-  var trigger = e.detail.elt;
-  var status = e.detail.xhr ? e.detail.xhr.status : 0;
-  var msg = trigger.getAttribute('data-toast');
-  if (msg) {
-    showToast(msg, status >= 200 && status < 400 ? 'success' : 'error');
-  }
-});
-
-// Keyboard shortcuts for review
-document.addEventListener('keydown', function(e) {
-  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
-  var btn;
-  if (e.key === 'ArrowLeft' || e.key === 'j') btn = document.querySelector('.review-btn.reject');
-  if (e.key === 'ArrowDown' || e.key === 'k') btn = document.querySelector('.review-btn.maybe');
-  if (e.key === 'ArrowRight' || e.key === 'l') btn = document.querySelector('.review-btn.qualify');
-  if (btn) btn.click();
-});
-</script>
-
-</body>
+      // Keyboard shortcuts for review
+      document.addEventListener("keydown", function (e) {
+        if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA")
+          return;
+        var btn;
+        if (e.key === "ArrowLeft" || e.key === "j")
+          btn = document.querySelector(".review-btn.reject");
+        if (e.key === "ArrowDown" || e.key === "k")
+          btn = document.querySelector(".review-btn.maybe");
+        if (e.key === "ArrowRight" || e.key === "l")
+          btn = document.querySelector(".review-btn.qualify");
+        if (btn) btn.click();
+      });
+    </script>
+  </body>
 </html>
