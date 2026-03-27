@@ -43,6 +43,47 @@ _scraper = None
 _rate_limiter = None
 
 
+async def _auto_relogin(scraper) -> bool:
+    """Try to re-authenticate LinkedIn via 'Welcome Back' auto-click.
+
+    LinkedIn remembers the account in the browser profile. If the session
+    cookie expired but the profile still has the account saved, we can
+    click the account card to re-authenticate without credentials.
+    """
+    page = scraper._page
+    if not page:
+        return False
+
+    try:
+        await page.goto("https://www.linkedin.com/login", wait_until="domcontentloaded", timeout=15000)
+        await asyncio.sleep(3)
+
+        body = await page.inner_text("body")
+        if "Welcome Back" not in body and "Welcome back" not in body:
+            logger.info("No Welcome Back page — manual login required")
+            return False
+
+        # Find and click the account card
+        cards = await page.query_selector_all("div[role='button'], button, a")
+        for card in cards:
+            text = (await card.text_content() or "").lower()
+            if "gmail" in text or "benoit" in text or "ddlp" in text:
+                logger.info("Auto-clicking Welcome Back account card...")
+                await card.click()
+                await asyncio.sleep(8)
+                break
+
+        url = page.url
+        if "/feed" in url:
+            return True
+
+        return False
+
+    except Exception:
+        logger.error("Auto-relogin error:", exc_info=True)
+        return False
+
+
 def set_scraper(scraper, rate_limiter) -> None:
     global _scraper, _rate_limiter
     _scraper = scraper
@@ -78,13 +119,22 @@ async def run_research_loop() -> None:
                 LOOP_STATE["current_step"] = "Demarrage du navigateur..."
                 await _scraper.start()
 
-            # --- Step 3: Check LinkedIn session ---
+            # --- Step 3: Check LinkedIn session (auto-relogin if Welcome Back) ---
             session_valid = await _scraper.is_session_valid()
             if not session_valid:
-                LOOP_STATE["last_error"] = "Session LinkedIn expiree — scraping skipped, analyse continue"
-                logger.warning("LinkedIn session expired — skipping scrape, continuing with analysis/improvement")
-                # DON'T stop the loop — still do analysis + improvement steps
-                # The loop NEVER STOPS (Karpathy: "do NOT pause to ask the human")
+                logger.warning("LinkedIn session expired — attempting auto-relogin...")
+                LOOP_STATE["current_step"] = "Session expiree — tentative de reconnexion auto..."
+                try:
+                    session_valid = await _auto_relogin(_scraper)
+                    if session_valid:
+                        logger.info("AUTO-RELOGIN SUCCESS via Welcome Back")
+                        LOOP_STATE["last_error"] = None
+                    else:
+                        logger.warning("Auto-relogin failed — scraping skipped")
+                        LOOP_STATE["last_error"] = "Session LinkedIn expiree — reconnexion auto echouee"
+                except Exception:
+                    logger.error("Auto-relogin exception:", exc_info=True)
+                    LOOP_STATE["last_error"] = "Session LinkedIn expiree — reconnexion auto echouee"
 
             # --- Step 4: Scrape LinkedIn (only if session valid) ---
             total_found = 0
