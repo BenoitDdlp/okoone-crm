@@ -51,9 +51,9 @@ class RateLimiter:
         LinkedIn bans are triggered by profile views, not searches.
         Searches are much safer — we can be more aggressive.
 
-        Week 0-1: 20 profiles, 50 searches (searches are safe)
-        Week 2:   30 profiles, 80 searches
-        Week 3+:  full limits (50 profiles, 100 searches)
+        Week 0-1: 20 profiles, 100 searches (searches are safe)
+        Week 2:   30 profiles, 150 searches
+        Week 3+:  full limits (50 profiles, 200 searches)
         """
         weeks = self._account_age_weeks()
 
@@ -68,9 +68,9 @@ class RateLimiter:
         if action_type == "search":
             base = self._max_searches
             if weeks <= 1:
-                return min(50, base)
+                return min(100, base)
             elif weeks == 2:
-                return min(80, base)
+                return min(150, base)
             elif weeks == 3:
                 return min(10, base)
             return base
