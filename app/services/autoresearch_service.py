@@ -323,13 +323,40 @@ class AutoresearchService:
 
 ---
 
+## REGLES CRITIQUES POUR LA GENERATION DE QUERIES
+
+**LinkedIn search fonctionne avec des queries COURTES et LARGES.**
+La recherche LinkedIn est un moteur simple, PAS Google. Plus tu mets de mots-cles, moins tu obtiens de resultats.
+
+### REGLE 1: Maximum 2-3 mots-cles par query
+- BONNE query: "CTO Singapore" (2 mots → beaucoup de resultats)
+- BONNE query: "VP Engineering Bangkok" (3 mots → bons resultats)
+- BONNE query: "Head of Digital Singapore" (4 mots → acceptable)
+- MAUVAISE query: "CTO proptech seed funding Jakarta Indonesia" (6 mots → 0 resultats)
+- MAUVAISE query: "VP Engineering SaaS B2B fintech" (5 mots → 0 resultats)
+
+### REGLE 2: Utilise le champ location SEPAREMENT des keywords
+- CORRECT: keywords="CTO", location="Singapore" → LinkedIn filtre par geo
+- INCORRECT: keywords="CTO Singapore" → cherche "CTO Singapore" dans le texte
+
+### REGLE 3: TOUJOURS inclure au moins 2 queries pour Singapore (marche principal)
+Singapore est notre marche prioritaire. Chaque plan doit avoir minimum 2 queries ciblant Singapore.
+
+### REGLE 4: Privilegie les titres generiques
+Exemples de bons keywords: "CTO", "VP Engineering", "Head of Digital", "IT Director",
+"Chief Technology Officer", "Software Engineering Lead", "Director of Engineering",
+"Head of Product", "VP Technology", "Digital Transformation Director"
+
+### REGLE 5: NE JAMAIS combiner titre + secteur + stage + pays dans les keywords
+Chaque mot supplementaire DIVISE le nombre de resultats par 5-10x.
+
 Genere 5-8 requetes de recherche LinkedIn NOUVELLES et DIFFERENTES des keywords deja utilises.
 Inspire-toi des queries performantes pour trouver des angles similaires mais nouveaux.
 Evite les patterns des queries sous-performantes.
 Varie les titres, secteurs, localisations, et formulations pour maximiser la diversite des prospects.
 Pour chaque requete, donne:
-- keywords: les mots-cles LinkedIn (DIFFERENTS des precedents)
-- location: la localisation (ou null)
+- keywords: les mots-cles LinkedIn (2-3 mots MAXIMUM, DIFFERENTS des precedents)
+- location: la localisation (utilise ce champ au lieu de mettre le pays dans keywords)
 - reasoning: pourquoi cette requete est pertinente (reference les donnees de performance si applicable)
 
 Reponds en JSON array uniquement, pas de texte avant/apres:

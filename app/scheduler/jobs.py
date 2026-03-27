@@ -97,6 +97,21 @@ async def run_research_loop() -> None:
             if not session_valid:
                 logger.info("SCRAPE SKIPPED (session expired) — jumping to analysis steps")
 
+            # Emergency mode: if too many consecutive empty runs, use guaranteed-results queries
+            EMERGENCY_QUERIES = [
+                {"keywords": "CTO", "location": "Singapore", "reasoning": "emergency-mode fallback"},
+                {"keywords": "VP Engineering", "location": "Singapore", "reasoning": "emergency-mode fallback"},
+                {"keywords": "Head of Digital", "location": "Singapore", "reasoning": "emergency-mode fallback"},
+                {"keywords": "IT Director", "location": "Singapore", "reasoning": "emergency-mode fallback"},
+                {"keywords": "Software engineering lead", "location": "Singapore", "reasoning": "emergency-mode fallback"},
+            ]
+            if LOOP_STATE["consecutive_empty_runs"] >= 3:
+                logger.warning(
+                    "EMERGENCY MODE: %d consecutive empty runs — switching to broad guaranteed queries",
+                    LOOP_STATE["consecutive_empty_runs"],
+                )
+                queries = EMERGENCY_QUERIES
+
             if session_valid:
                 for i, q in enumerate(queries[:5]):
                     kw = q["keywords"]
@@ -107,8 +122,39 @@ async def run_research_loop() -> None:
                     LOOP_STATE["current_step"] = f"Recherche {i+1}/{min(len(queries), 5)}: {kw[:40]}..."
 
                     try:
+                        # Page 1
                         results = await _scraper.search_people(kw, loc)
-                        logger.info("SCRAPE [%d/%d] got %d results", i + 1, min(len(queries), 5), len(results))
+                        logger.info("SCRAPE [%d/%d] page 1 got %d results", i + 1, min(len(queries), 5), len(results))
+
+                        # Paginate up to 10 pages (~100 results per query)
+                        if results:
+                            for pg in range(2, 11):
+                                await asyncio.sleep(random.uniform(2.0, 5.0))
+                                try:
+                                    pg_results = await _scraper.search_people(kw, loc, page=pg)
+                                    logger.info("SCRAPE [%d/%d] page %d: %d results", i + 1, min(len(queries), 5), pg, len(pg_results))
+                                    if not pg_results:
+                                        break
+                                    results.extend(pg_results)
+                                except DailyLimitReached:
+                                    raise
+                                except Exception:
+                                    logger.warning("Page %d failed for '%s', stopping", pg, kw)
+                                    break
+
+                        # Retry with simplified query if 0 results (too specific)
+                        if not results:
+                            simplified_kw = " ".join(kw.split()[:2])
+                            if simplified_kw != kw:
+                                logger.info("SCRAPE [%d/%d] 0 results — retrying with simplified keywords: '%s'", i + 1, min(len(queries), 5), simplified_kw)
+                                await asyncio.sleep(random.uniform(2.0, 4.0))
+                                results = await _scraper.search_people(simplified_kw, loc)
+                                logger.info("SCRAPE [%d/%d] simplified retry got %d results", i + 1, min(len(queries), 5), len(results))
+                                if results:
+                                    # Track under the simplified key
+                                    query_key = f"{simplified_kw}||{loc or ''}"
+                                    query_prospect_map.setdefault(query_key, [])
+
                         for j, r in enumerate(results[:3]):
                             logger.info("  result[%d]: %s", j, {k: str(v)[:50] for k, v in r.items()})
                         total_found += len(results)

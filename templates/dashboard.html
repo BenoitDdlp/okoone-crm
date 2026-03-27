@@ -103,9 +103,10 @@
     <table class="prospect-table">
       <thead>
         <tr>
+          <th class="th-rank">#</th>
           <th>Score</th>
           <th>Nom</th>
-          <th>Titre</th>
+          <th>Headline</th>
           <th>Entreprise</th>
           <th>Location</th>
           <th>Status</th>
@@ -119,6 +120,7 @@
           hx-swap="innerHTML"
           class="prospect-row"
         >
+          <td class="td-rank">{{ loop.index + ((page - 1) * 50) }}</td>
           <td>
             {% set s = p.relevance_score|default(0)|round|int %}
             <span
@@ -128,7 +130,7 @@
           </td>
           <td class="td-name">{{ p.full_name or '?' }}</td>
           <td class="td-headline">
-            {{ (p.headline or '')[:45] }}{% if (p.headline or '')|length > 45
+            {{ (p.headline or '—')[:40] }}{% if (p.headline or '')|length > 40
             %}...{% endif %}
           </td>
           <td class="td-company">{{ p.current_company or '—' }}</td>

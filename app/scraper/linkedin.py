@@ -27,12 +27,38 @@ _GARBAGE_NAME_PATTERNS = [
     _re.compile(r"^Status is (offline|online|reachable)$", _re.IGNORECASE),
     _re.compile(r"View .+[\u2018\u2019']s\s+profile", _re.IGNORECASE),
     _re.compile(r"^Provides services", _re.IGNORECASE),
-    _re.compile(r"^ACoAA"),
+    _re.compile(r"^ACoA"),
+]
+
+_GARBAGE_NAME_PREFIXES = [
+    "Join LinkedIn", "LinkedIn Member", "Sign in",
+    "Provides services", "ACoAA", "ACoA",
 ]
 
 _VIEW_PROFILE_SUFFIX = _re.compile(
     r"View\s+.+[\u2018\u2019']s\s+profile\s*$", _re.IGNORECASE
 )
+
+
+def _is_garbage_name(name: str) -> bool:
+    """Return True if *name* is clearly not a real person name."""
+    if not name or len(name) < 2:
+        return True
+    for prefix in _GARBAGE_NAME_PREFIXES:
+        if name.startswith(prefix):
+            return True
+    # Names longer than 80 chars are almost certainly service descriptions
+    if len(name) > 80:
+        return True
+    for pat in _GARBAGE_NAME_PATTERNS:
+        if pat.search(name):
+            return True
+    return False
+
+
+def _is_acoa_username(username: str) -> bool:
+    """Return True if *username* is an internal LinkedIn ACoAA identifier."""
+    return bool(username) and username.startswith("ACoA")
 
 
 def _sanitize_search_results(results: list[dict[str, str]]) -> list[dict[str, str]]:
@@ -44,6 +70,17 @@ def _sanitize_search_results(results: list[dict[str, str]]) -> list[dict[str, st
     """
     clean: list[dict[str, str]] = []
     for r in results:
+        # Filter out ACoAA internal IDs masquerading as usernames —
+        # these profiles cannot be deep-screened anyway.
+        username = r.get("profile_username", "")
+        if _is_acoa_username(username):
+            logger.debug(
+                "Dropping result with ACoAA username: %s (%s)",
+                r.get("full_name"),
+                username,
+            )
+            continue
+
         name = r.get("full_name", "").strip()
         headline = r.get("headline", "").strip()
         location = r.get("location", "").strip()
@@ -53,12 +90,7 @@ def _sanitize_search_results(results: list[dict[str, str]]) -> list[dict[str, st
         name = _VIEW_PROFILE_SUFFIX.sub("", name).strip()
 
         # Step 2: Check if the (possibly cleaned) name is still garbage
-        name_is_bad = not name or len(name) < 2
-        if not name_is_bad:
-            for pat in _GARBAGE_NAME_PATTERNS:
-                if pat.search(name):
-                    name_is_bad = True
-                    break
+        name_is_bad = _is_garbage_name(name)
 
         if name_is_bad:
             # Try to recover name from headline ("RealNameView RealName's profile")
@@ -69,12 +101,7 @@ def _sanitize_search_results(results: list[dict[str, str]]) -> list[dict[str, st
                 name = m.group(1).strip()
             elif headline and len(headline) >= 2:
                 # Headline itself might be a clean name (from earlier extraction)
-                hl_ok = True
-                for pat in _GARBAGE_NAME_PATTERNS:
-                    if pat.search(headline):
-                        hl_ok = False
-                        break
-                if hl_ok:
+                if not _is_garbage_name(headline):
                     # Don't use headline as name if it looks like a job title
                     pass  # safer to drop than to misassign
                 # Cannot recover a meaningful name; skip this result entirely
@@ -314,18 +341,29 @@ class LinkedInScraper:
             const SKIP = ['Status is online', 'Status is offline', 'Status is reachable',
                           'Connect', 'Follow', 'Message', 'Pending', 'Send InMail'];
 
-            // Helper: strip "View X's profile" suffix (handles both curly and straight apostrophes)
+            // Helper: strip "View X's profile" prefix+suffix
+            // Handles curly apostrophes (\u2018 \u2019), straight quote, and HTML entities
             function stripViewProfile(s) {
-                return s.replace(/View\\s+.+[\\u2018\\u2019']s\\s+profile$/i, '')
-                        .replace(/[\\u2018\\u2019']s\\s+profile$/i, '')
+                // First try to extract the name from "View <name>'s profile"
+                const m = s.match(/^View\\s+(.+?)[\\u2018\\u2019\\u0027\u2018\u2019']s\\s+profile$/i);
+                if (m) return m[1].trim();
+                // Fallback: just strip suffixes
+                return s.replace(/[\\u2018\\u2019\\u0027\u2018\u2019']s\\s+profile$/i, '')
+                        .replace(/^View\\s+/i, '')
                         .trim();
             }
-            // Helper: check if text is noise (status indicators, profile view text, buttons)
+            // Helper: check if text is noise (status indicators, profile view text, buttons, garbage names)
             function isNoise(t) {
                 if (SKIP.includes(t)) return true;
                 if (/^Status is /i.test(t)) return true;
                 if (/^View /i.test(t) && /profile/i.test(t)) return true;
                 if (/[\\u2018\\u2019']s\\s+profile$/i.test(t)) return true;
+                if (/^Join LinkedIn/i.test(t)) return true;
+                if (/^LinkedIn Member/i.test(t)) return true;
+                if (/^Sign in/i.test(t)) return true;
+                if (/^Provides services/i.test(t)) return true;
+                if (/^ACoA/.test(t)) return true;
+                if (t.length > 80) return true;
                 return false;
             }
 
@@ -335,6 +373,8 @@ class LinkedInScraper:
                 const href = link.getAttribute('href') || '';
                 const usernameMatch = href.match(/\\/in\\/([^/?]+)/);
                 if (!usernameMatch) continue;
+                // Skip ACoAA internal IDs — they cannot be deep-screened
+                if (/^ACoA/.test(usernameMatch[1])) continue;
 
                 // Get the name from the link's aria-label or span[aria-hidden="true"]
                 let name = '';
@@ -413,7 +453,14 @@ class LinkedInScraper:
                         'Comment', 'Share', 'Report', 'Save'
                     ];
                     function isNoise(t) {
-                        return SKIP_LINES.some(s => t.includes(s));
+                        if (SKIP_LINES.some(s => t.includes(s))) return true;
+                        if (/^Join LinkedIn/i.test(t)) return true;
+                        if (/^LinkedIn Member/i.test(t)) return true;
+                        if (/^Sign in/i.test(t)) return true;
+                        if (/^Provides services/i.test(t)) return true;
+                        if (/^ACoA/.test(t)) return true;
+                        if (t.length > 80) return true;
+                        return false;
                     }
                     function cleanLines(raw) {
                         return raw.split('\\n')
@@ -433,13 +480,19 @@ class LinkedInScraper:
                         seenHrefs.add(m[1]);
 
                         // Strategy 1: aria-label (e.g. "View John Doe's profile")
+                        // Handle curly apostrophes (\u2018 \u2019) and straight quotes
                         let name = '';
                         const ariaLabel = a.getAttribute('aria-label') || '';
                         if (ariaLabel) {
-                            name = ariaLabel
-                                .replace(/^View\\s+/i, '')
-                                .replace(/[\\u2019']s\\s+profile$/i, '')
-                                .trim();
+                            const am = ariaLabel.match(/^View\\s+(.+?)[\\u2018\\u2019\\u0027\u2018\u2019']s\\s+profile$/i);
+                            if (am) {
+                                name = am[1].trim();
+                            } else {
+                                name = ariaLabel
+                                    .replace(/[\\u2018\\u2019\\u0027\u2018\u2019']s\\s+profile$/i, '')
+                                    .replace(/^View\\s+/i, '')
+                                    .trim();
+                            }
                         }
 
                         // Strategy 2: span[aria-hidden="true"] inside the link
@@ -475,6 +528,9 @@ class LinkedInScraper:
                                 }
                             }
                         }
+
+                        // Skip ACoAA internal IDs — they cannot be deep-screened
+                        if (/^ACoA/.test(m[1])) continue;
 
                         results.push({
                             username: m[1],
@@ -535,6 +591,27 @@ class LinkedInScraper:
         """
         if not self._page:
             raise RuntimeError("Scraper not started; call start() first")
+
+        # ACoAA usernames are internal LinkedIn IDs — they resolve to a
+        # "Join LinkedIn" page and waste a rate-limit token.
+        if _is_acoa_username(username):
+            logger.info(
+                "Skipping ACoAA internal ID profile: %s", username
+            )
+            return {
+                "username": username,
+                "full_name": "",
+                "headline": "",
+                "location": "",
+                "about": "",
+                "current_company": "",
+                "current_title": "",
+                "experience": [],
+                "education": [],
+                "skills": [],
+                "profile_photo_url": "",
+                "error": "acoa_internal_id",
+            }
 
         await self._rate_limiter.acquire("profile")
 
