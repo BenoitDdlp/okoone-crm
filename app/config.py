@@ -17,7 +17,7 @@ class Settings(BaseSettings):
 
     FERNET_KEY: str
 
-    LINKEDIN_DAILY_SEARCH_LIMIT: int = 15
+    LINKEDIN_DAILY_SEARCH_LIMIT: int = 100
     LINKEDIN_DAILY_PROFILE_LIMIT: int = 50
     LINKEDIN_PROFILE_DIR: str = "/home/openclaw/.okoone-linkedin/profile"
     LINKEDIN_ACCOUNT_CREATED: str = "2026-03-25"

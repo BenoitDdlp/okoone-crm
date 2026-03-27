@@ -48,29 +48,29 @@ class RateLimiter:
     def _daily_limit(self, action_type: str) -> int:
         """Ramp up limits based on account age.
 
-        Week 0-1: 10 profiles, 5 searches (baby account)
-        Week 2:   20 profiles, 8 searches
-        Week 3:   30 profiles, 10 searches
-        Week 4+:  full limits (50 profiles, 15 searches)
+        LinkedIn bans are triggered by profile views, not searches.
+        Searches are much safer — we can be more aggressive.
+
+        Week 0-1: 20 profiles, 50 searches (searches are safe)
+        Week 2:   30 profiles, 80 searches
+        Week 3+:  full limits (50 profiles, 100 searches)
         """
         weeks = self._account_age_weeks()
 
         if action_type == "profile":
             base = self._max_profiles
             if weeks <= 1:
-                return min(10, base)
-            elif weeks == 2:
                 return min(20, base)
-            elif weeks == 3:
+            elif weeks == 2:
                 return min(30, base)
             return base
 
         if action_type == "search":
             base = self._max_searches
             if weeks <= 1:
-                return min(5, base)
+                return min(50, base)
             elif weeks == 2:
-                return min(8, base)
+                return min(80, base)
             elif weeks == 3:
                 return min(10, base)
             return base
