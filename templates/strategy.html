@@ -227,7 +227,69 @@
 </div>
 
 <!-- ============================================================
-     SECTION 5: RUN HISTORY
+     SECTION 5: PROGRAM CHANGELOG
+     Shows all version changes with trigger + reason.
+     ============================================================ -->
+<div class="section-card">
+  <h2>Changelog du Programme</h2>
+  <p class="section-desc">
+    Chaque modification du programme est tracee : qui l'a changee, pourquoi, et
+    quand. Les feedbacks humains declenchent une revision immediate par Claude.
+  </p>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Version</th>
+        <th>Date</th>
+        <th>Declencheur</th>
+        <th>Auteur</th>
+        <th>Raison</th>
+        <th>Status</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for v in versions %}
+      <tr>
+        <td style="font-weight: 600">v{{ v.version }}</td>
+        <td style="color: var(--muted); font-size: 0.85rem">
+          {{ v.created_at[:16] if v.created_at else '—' }}
+        </td>
+        <td>
+          {% set trig = v.trigger or 'manual' %}
+          <span
+            class="pill {{ 'pill-info' if trig == 'auto' else 'pill-success' if trig == 'feedback' else 'pill-warning' if trig == 'manual' else 'pill-muted' }}"
+          >
+            {{ trig }}
+          </span>
+        </td>
+        <td>{{ v.author or '—' }}</td>
+        <td
+          style="
+            font-size: 0.85rem;
+            max-width: 300px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+          "
+        >
+          {{ v.change_reason or '—' }}
+        </td>
+        <td>
+          <span
+            class="pill {{ 'pill-success' if v.status == 'active' else 'pill-muted' }}"
+          >
+            {{ v.status }}
+          </span>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<!-- ============================================================
+     SECTION 6: RUN HISTORY
      Shows what happened in each research cycle.
      ============================================================ -->
 <div class="section-card">

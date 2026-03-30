@@ -9,9 +9,79 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
+import logging
+import re
+
 from app.database import get_db
 from app.models import HumanReviewCreate, ProspectUpdate
 from app.repositories.prospect_repo import ProspectRepository
+
+logger = logging.getLogger("okoone.prospects")
+
+
+async def _feedback_program_revision(feedback: str, prospect_name: str, verdict: str) -> None:
+    """Revise the program based on human feedback (runs in background).
+
+    When the user gives feedback like 'pas de cambodge' or 'plus de startups SaaS',
+    Claude reads the current program + the feedback and produces a revised version.
+    This is the human-in-the-loop part of the Karpathy pattern.
+    """
+    try:
+        from app.services.claude_advisor import _call_claude
+        from app.services.autoresearch_service import AutoresearchService
+
+        svc = AutoresearchService()
+        async with get_db() as db:
+            version, program = await svc._load_program(db)
+
+            prompt = f"""## Programme actuel (v{version})
+{program}
+
+## Feedback humain (sur le prospect "{prospect_name}", verdict: {verdict})
+{feedback}
+
+---
+
+Revise le programme de recherche en tenant compte de ce feedback.
+Le feedback vient d'un humain qui qualifie les prospects — c'est TA METRIQUE PRINCIPALE.
+Integre le feedback dans le programme de maniere permanente.
+
+IMPORTANT:
+- Retourne le programme COMPLET revise (pas juste les diffs)
+- Le programme DOIT commencer par "# Prospect Research Program"
+- Garde toutes les sections existantes (Objectif, Profil cible, etc.)
+- Integre le feedback comme nouvelle regle ou ajustement
+
+```
+# Prospect Research Program v{version + 1}
+
+[... programme complet revise ...]
+```"""
+
+            text = await _call_claude(prompt, system="")
+
+            # Extract program from code block
+            proposed = ""
+            for pattern in [r"```(?:markdown)?\n(.*?)\n```", r"```\n(.*?)\n```", r"```(.*?)```"]:
+                match = re.search(pattern, text, re.DOTALL)
+                if match:
+                    proposed = match.group(1).strip()
+                    break
+
+            if proposed and svc._is_valid_program(proposed):
+                new_version = await svc.apply_program(db, proposed, author="feedback")
+                # Set trigger and reason on the new version
+                await db.execute(
+                    "UPDATE prospect_program SET trigger = 'feedback', change_reason = ? WHERE version = ?",
+                    (f"Feedback on {prospect_name} ({verdict}): {feedback[:200]}", new_version),
+                )
+                await db.commit()
+                logger.info("FEEDBACK REVISION: program updated to v%d based on: %s", new_version, feedback[:80])
+            else:
+                logger.warning("FEEDBACK REVISION: Claude's response was not a valid program")
+
+    except Exception:
+        logger.error("FEEDBACK REVISION failed:", exc_info=True)
 
 router = APIRouter(prefix="/api/v1/prospects", tags=["prospects"])
 templates = Jinja2Templates(directory="templates")
@@ -242,6 +312,13 @@ async def review_prospect(
             update_fields["relevance_score"] = float(relevance_override)
 
         await repo.update(prospect_id, update_fields)
+
+        # If feedback is substantial, trigger an immediate program revision
+        if feedback_text and len(feedback_text.strip()) > 10:
+            import asyncio
+            asyncio.create_task(_feedback_program_revision(
+                feedback_text, prospect.get("full_name", ""), verdict
+            ))
         await db.commit()
 
         updated = await repo.find_by_id(prospect_id)

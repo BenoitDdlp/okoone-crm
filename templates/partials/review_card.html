@@ -294,13 +294,32 @@
   </div>
 </div>
 
+<!-- Feedback input -->
+<div style="margin: 0.75rem 0; padding: 0 0.5rem">
+  <textarea
+    id="review-feedback"
+    rows="2"
+    placeholder="Feedback optionnel pour Claude (ex: 'pas de cambodge', 'plus de startups SaaS', 'ce profil est parfait, en trouver plus comme lui')"
+    style="
+      width: 100%;
+      font-size: 0.85rem;
+      background: var(--surface-2);
+      border: 1px solid var(--border-light);
+      border-radius: var(--radius-sm);
+      padding: 0.5rem 0.75rem;
+      color: var(--text);
+      resize: vertical;
+    "
+  ></textarea>
+</div>
+
 <div class="review-actions">
   <button
     class="review-btn reject"
     hx-post="/api/v1/prospects/{{ prospect.id }}/review"
-    hx-vals='{"verdict": "reject"}'
     hx-target="#review-area"
     hx-swap="innerHTML"
+    hx-on::before-request="this.setAttribute('hx-vals', JSON.stringify({verdict:'reject', feedback_text: document.getElementById('review-feedback').value}))"
     hx-on::after-request="setTimeout(function(){window.location.href='/prospects'},300)"
     data-toast="Prospect rejete"
   >
@@ -312,9 +331,9 @@
   <button
     class="review-btn maybe"
     hx-post="/api/v1/prospects/{{ prospect.id }}/review"
-    hx-vals='{"verdict": "flag"}'
     hx-target="#review-area"
     hx-swap="innerHTML"
+    hx-on::before-request="this.setAttribute('hx-vals', JSON.stringify({verdict:'flag', feedback_text: document.getElementById('review-feedback').value}))"
     hx-on::after-request="setTimeout(function(){window.location.href='/prospects'},300)"
     data-toast="Marque peut-etre"
   >
@@ -326,9 +345,9 @@
   <button
     class="review-btn qualify"
     hx-post="/api/v1/prospects/{{ prospect.id }}/review"
-    hx-vals='{"verdict": "approve"}'
     hx-target="#review-area"
     hx-swap="innerHTML"
+    hx-on::before-request="this.setAttribute('hx-vals', JSON.stringify({verdict:'approve', feedback_text: document.getElementById('review-feedback').value}))"
     hx-on::after-request="setTimeout(function(){window.location.href='/prospects'},300)"
     data-toast="Prospect qualifie !"
   >

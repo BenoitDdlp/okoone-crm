@@ -119,7 +119,12 @@ async def stop_loop(request: Request):
 @router.put("/api/v1/strategy/program")
 async def save_program(content: str = Form(...)):
     async with get_db() as db:
-        await research.apply_program(db, content, author="human")
+        new_v = await research.apply_program(db, content, author="human")
+        await db.execute(
+            "UPDATE prospect_program SET trigger = 'manual', change_reason = 'Modification manuelle' WHERE version = ?",
+            (new_v,),
+        )
+        await db.commit()
     return {"ok": True}
 
 

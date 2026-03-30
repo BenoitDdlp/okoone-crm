@@ -340,7 +340,14 @@ async def init_db() -> None:
         try:
             await db.execute("ALTER TABLE prospects ADD COLUMN web_research_json TEXT")
         except Exception:
-            pass  # column already exists
+            pass
+
+        # Migration: add trigger + change_reason to prospect_program (changelog)
+        for col in ["trigger TEXT DEFAULT 'manual'", "change_reason TEXT"]:
+            try:
+                await db.execute(f"ALTER TABLE prospect_program ADD COLUMN {col}")
+            except Exception:
+                pass
 
         existing = await db.execute_fetchall(
             "SELECT id FROM scoring_weights WHERE name = 'default'"

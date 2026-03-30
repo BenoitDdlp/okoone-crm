@@ -545,6 +545,11 @@ async def run_research_loop() -> None:
                         (current_run_id,),
                     )
                     await db.commit()
+                    await db.execute(
+                        "UPDATE prospect_program SET trigger = 'auto', change_reason = ? WHERE version = ?",
+                        (f"Auto-accepted from run#{current_run_id} (found={total_new})", new_version),
+                    )
+                    await db.commit()
                     logger.info("KARPATHY KEEP: program v%d accepted (run#%d, found=%d, empty_streak=%d)",
                                 new_version, current_run_id, total_new, LOOP_STATE["consecutive_empty_runs"])
                 except Exception:
