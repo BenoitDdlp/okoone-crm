@@ -35,7 +35,8 @@ RESCORE_STATE: dict = {
 async def _rescore_all_screened(program_version: int) -> None:
     """Re-score + re-analyze all screened prospects after a program change.
 
-    Runs in background. Updates RESCORE_STATE for progress tracking.
+    Uses bulk loading (all prospects in one SELECT) then batch commits
+    every 20 prospects for speed. No individual find_by_id.
     """
     RESCORE_STATE["active"] = True
     RESCORE_STATE["done"] = 0
@@ -43,7 +44,6 @@ async def _rescore_all_screened(program_version: int) -> None:
 
     try:
         from app.database import get_db
-        from app.repositories.prospect_repo import ProspectRepository
         from app.services.scoring_service import ScoringService
 
         scoring = ScoringService()
@@ -59,45 +59,45 @@ async def _rescore_all_screened(program_version: int) -> None:
                 return
             weights = json.loads(w_row[0])
 
-            # Get all screened prospects
+            # Bulk load ALL screened prospects in one query
             cursor = await db.execute(
-                "SELECT id, full_name FROM prospects WHERE status = 'screened' ORDER BY relevance_score DESC"
+                "SELECT * FROM prospects WHERE status = 'screened' ORDER BY relevance_score DESC"
             )
-            prospects = await cursor.fetchall()
-            RESCORE_STATE["total"] = len(prospects)
-            logger.info("RESCORE: starting re-score of %d screened prospects (program v%d)", len(prospects), program_version)
+            all_rows = await cursor.fetchall()
+            all_prospects = [dict(r) for r in all_rows]
+            RESCORE_STATE["total"] = len(all_prospects)
+            logger.info("RESCORE: bulk loaded %d screened prospects (program v%d)", len(all_prospects), program_version)
 
-            repo = ProspectRepository(db)
-
-            for i, row in enumerate(prospects):
-                pid, name = row[0], row[1] or "?"
+            # Score in batches of 20, commit after each batch
+            BATCH_SIZE = 20
+            for i, prospect in enumerate(all_prospects):
+                pid = prospect["id"]
+                name = prospect.get("full_name") or "?"
                 RESCORE_STATE["done"] = i
-                RESCORE_STATE["current"] = name
+                RESCORE_STATE["current"] = f"{name} ({i+1}/{len(all_prospects)})"
 
-                prospect = await repo.find_by_id(pid)
-                if not prospect:
-                    continue
-
-                # Re-score
                 score, breakdown = await scoring.score_prospect(prospect, weights)
                 summary = scoring.generate_score_summary(breakdown, weights, prospect)
-                await repo.update(pid, {
-                    "relevance_score": score,
-                    "score_breakdown": json.dumps(breakdown),
-                    "score_summary": summary,
-                })
+
+                await db.execute(
+                    "UPDATE prospects SET relevance_score=?, score_breakdown=?, score_summary=? WHERE id=?",
+                    (score, json.dumps(breakdown), summary, pid),
+                )
+
+                # Batch commit every 20
+                if (i + 1) % BATCH_SIZE == 0:
+                    await db.commit()
+                    logger.info("RESCORE: batch commit %d/%d", i + 1, len(all_prospects))
 
             await db.commit()
-            RESCORE_STATE["done"] = len(prospects)
-            RESCORE_STATE["current"] = "Termine!"
-            logger.info("RESCORE: complete — %d prospects re-scored", len(prospects))
+            RESCORE_STATE["done"] = len(all_prospects)
+            RESCORE_STATE["current"] = "Scores mis a jour! Analyse Claude en cours..."
+            logger.info("RESCORE: complete — %d prospects re-scored", len(all_prospects))
 
-            # Now re-run Claude deep analysis on top 10 (in background, takes time)
+            # Re-run Claude deep analysis on top 10 with enriched data
             try:
                 from app.services.deep_analysis_service import DeepAnalysisService
                 deep_svc = DeepAnalysisService()
-
-                # Load program + acquaintances for analysis
                 svc = AutoresearchService()
                 _, program_content = await svc._load_program(db)
                 acquaintances = await svc._load_acquaintances(db)
@@ -113,15 +113,18 @@ async def _rescore_all_screened(program_version: int) -> None:
                 RESCORE_STATE["current"] = f"Analyse Claude: 0/{len(top_prospects)}"
                 for j, tp in enumerate(top_prospects):
                     pid = tp[0]
-                    prospect = await repo.find_by_id(pid)
-                    if not prospect:
+                    p_cursor = await db.execute("SELECT * FROM prospects WHERE id = ?", (pid,))
+                    p_row = await p_cursor.fetchone()
+                    if not p_row:
                         continue
+                    prospect = dict(p_row)
                     RESCORE_STATE["current"] = f"Analyse Claude: {j+1}/{len(top_prospects)} — {tp[1] or '?'}"
                     try:
                         analysis = await deep_svc.analyze_prospect(prospect, program_content, acquaintances)
-                        await repo.update(pid, {
-                            "claude_analysis": json.dumps(analysis, ensure_ascii=False),
-                        })
+                        await db.execute(
+                            "UPDATE prospects SET claude_analysis = ? WHERE id = ?",
+                            (json.dumps(analysis, ensure_ascii=False), pid),
+                        )
                     except Exception:
                         logger.error("RESCORE: Claude analysis failed for %d", pid, exc_info=True)
 
