@@ -29,6 +29,36 @@ class AutoresearchService:
     # Data loaders
     # ------------------------------------------------------------------ #
 
+    @staticmethod
+    def _is_valid_program(text: str) -> bool:
+        """Check if a proposed program looks like a real research program.
+
+        A valid program must:
+        - Start with a markdown heading (# ...)
+        - Contain at least 'Objectif' or 'Profil' or 'cible'
+        - Be at least 200 chars (a real program is a full document)
+        - NOT be an analysis comment
+        """
+        if len(text) < 200:
+            return False
+        first_line = text.strip().split("\n")[0]
+        if not first_line.startswith("#"):
+            return False
+        text_lower = text.lower()
+        has_program_keywords = any(
+            kw in text_lower for kw in [
+                "objectif", "profil cible", "profil", "titres:",
+                "secteurs:", "localisation", "signaux",
+            ]
+        )
+        if not has_program_keywords:
+            return False
+        # Reject if it looks like an analysis (starts with analysis language)
+        analysis_signals = ["cela aurait", "analyse des", "ce qui fonctionne", "ce qui ne fonctionne"]
+        if any(text_lower.startswith(sig) for sig in analysis_signals):
+            return False
+        return True
+
     async def _load_program(self, db) -> tuple[int, str]:
         """Load active program. Returns (version, content)."""
         async with db.execute(
@@ -567,8 +597,21 @@ que le programme fonctionne. Quand il rejette, le programme doit changer.
 [Nouveaux secteurs, titres, localisations, formulations a essayer]
 
 ### Programme propose (v{version + 1})
+
+IMPORTANT: Le programme DOIT etre dans un code block markdown (triple backticks).
+Le programme DOIT commencer par "# Prospect Research Program" et contenir les sections
+Objectif, Profil cible, Signaux positifs, etc. C'est le DOCUMENT COMPLET, pas un diff.
+
 ```
-[Le programme complet ameliore — pas juste les diffs, mais le document entier]
+# Prospect Research Program v{version + 1}
+
+## Objectif
+[...]
+
+## Profil cible
+[...]
+
+[... reste du programme complet ...]
 ```
 
 ### Predictions
@@ -576,9 +619,22 @@ que le programme fonctionne. Quand il rejette, le programme doit changer.
 
         text = await _call_claude(prompt, system="")
 
-        # Extract proposed program from code block
-        program_match = re.search(r"```\n(.*?)\n```", text, re.DOTALL)
-        proposed = program_match.group(1) if program_match else ""
+        # Extract proposed program from code block (try multiple formats)
+        proposed = ""
+        for pattern in [
+            r"```(?:markdown)?\n(.*?)\n```",
+            r"```\n(.*?)\n```",
+            r"```(.*?)```",
+        ]:
+            match = re.search(pattern, text, re.DOTALL)
+            if match:
+                proposed = match.group(1).strip()
+                break
+
+        # VALIDATE: the proposed program must look like a real program, not an analysis
+        if proposed and not self._is_valid_program(proposed):
+            logger.warning("Proposed program REJECTED — doesn't look like a valid program: %s...", proposed[:100])
+            proposed = ""
 
         # Build current metrics summary for return value
         current_metrics = {
