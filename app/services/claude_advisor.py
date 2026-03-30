@@ -50,11 +50,20 @@ def _claude_env() -> dict[str, str]:
     }
 
 
-async def _call_claude(prompt: str, system: str = SYSTEM_PROMPT) -> str:
-    """Call Claude via CLI, passing the prompt via stdin (supports long prompts)."""
+MODEL_FAST = "claude-sonnet-4-6"  # For scoring, analysis, web research
+MODEL_SMART = MODEL                # Opus for strategy rewriting
+
+
+async def _call_claude(prompt: str, system: str = SYSTEM_PROMPT, model: str = "") -> str:
+    """Call Claude via CLI, passing the prompt via stdin (supports long prompts).
+
+    model: override the default model. Use MODEL_FAST for simple tasks,
+           MODEL_SMART (default) for strategy/complex reasoning.
+    """
+    use_model = model or MODEL
     full_prompt = f"{system}\n\n---\n\n{prompt}" if system else prompt
     proc = await asyncio.create_subprocess_exec(
-        CLAUDE_CLI, "-p", "-", "--model", MODEL,
+        CLAUDE_CLI, "-p", "-", "--model", use_model,
         stdin=asyncio.subprocess.PIPE,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,

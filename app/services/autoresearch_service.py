@@ -19,7 +19,7 @@ import re
 from datetime import datetime
 
 from app.config import settings
-from app.services.claude_advisor import _call_claude
+from app.services.claude_advisor import _call_claude, MODEL_FAST, MODEL_SMART
 
 
 # Global rescore progress (visible from UI)
@@ -509,7 +509,7 @@ Pour chaque requete, donne:
 Reponds en JSON array uniquement, pas de texte avant/apres:
 [{{"keywords": "...", "location": "...", "reasoning": "..."}}]"""
 
-        text = (await _call_claude(prompt, system="")).strip()
+        text = (await _call_claude(prompt, system="", model=MODEL_FAST)).strip()
         # Extract JSON from response
         if text.startswith("["):
             return json.loads(text)
@@ -569,7 +569,7 @@ Pour chaque prospect, evalue sa pertinence par rapport au programme.
 Reponds en JSON array:
 [{{"prospect_id": ID, "score": 0-100, "verdict": "qualified|maybe|reject", "reasoning": "1 phrase"}}]"""
 
-        text = (await _call_claude(prompt, system="")).strip()
+        text = (await _call_claude(prompt, system="", model=MODEL_FAST)).strip()
         match = re.search(r"\[.*\]", text, re.DOTALL)
         if match:
             return json.loads(match.group())
@@ -734,7 +734,7 @@ Objectif, Profil cible, Signaux positifs, etc. C'est le DOCUMENT COMPLET, pas un
 ### Predictions
 [Quelles metriques devraient s'ameliorer avec ces changements et pourquoi]"""
 
-        text = await _call_claude(prompt, system="")
+        text = await _call_claude(prompt, system="", model=MODEL_SMART)  # Opus for strategy
 
         # Extract proposed program from code block (try multiple formats)
         proposed = ""

@@ -13,7 +13,7 @@ import logging
 import re
 from datetime import datetime
 
-from app.services.claude_advisor import _call_claude
+from app.services.claude_advisor import _call_claude, MODEL_FAST
 
 logger = logging.getLogger("okoone.deep_analysis")
 
@@ -79,7 +79,7 @@ class DeepAnalysisService:
             "Sois honnete et tranchant. Un 'pass' est mieux qu'un faux positif."
         )
 
-        raw = await _call_claude(prompt, system=ANALYSIS_SYSTEM)
+        raw = await _call_claude(prompt, system=ANALYSIS_SYSTEM, model=MODEL_FAST)
         return self._parse_response(raw, prospect)
 
     # ------------------------------------------------------------------
@@ -304,7 +304,7 @@ class DeepAnalysisService:
 
         try:
             raw = await asyncio.wait_for(
-                _call_claude(prompt, system=self._WEB_RESEARCH_SYSTEM),
+                _call_claude(prompt, system=self._WEB_RESEARCH_SYSTEM, model=MODEL_FAST),
                 timeout=60,
             )
         except asyncio.TimeoutError:

@@ -27,7 +27,7 @@ async def _feedback_program_revision(feedback: str, prospect_name: str, verdict:
     This is the human-in-the-loop part of the Karpathy pattern.
     """
     try:
-        from app.services.claude_advisor import _call_claude
+        from app.services.claude_advisor import _call_claude, MODEL_SMART
         from app.services.autoresearch_service import AutoresearchService
 
         svc = AutoresearchService()
@@ -58,7 +58,7 @@ IMPORTANT:
 [... programme complet revise ...]
 ```"""
 
-            text = await _call_claude(prompt, system="")
+            text = await _call_claude(prompt, system="", model=MODEL_SMART)  # Opus for strategy
 
             # Extract program from code block
             proposed = ""
