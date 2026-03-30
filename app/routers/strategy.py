@@ -63,6 +63,33 @@ async def strategy_page(request: Request):
     )
 
 
+@router.get("/api/v1/strategy/rescore-status", response_class=HTMLResponse)
+async def rescore_status():
+    """Polled by UI to show re-scoring progress after program change."""
+    from app.services.autoresearch_service import RESCORE_STATE
+    s = RESCORE_STATE
+    if not s["active"] and s["total"] == 0:
+        return HTMLResponse("")
+
+    pct = int((s["done"] / s["total"]) * 100) if s["total"] > 0 else 0
+    active_class = "" if s["active"] else "display:none;"
+
+    return HTMLResponse(f"""
+    <div id="rescore-progress" style="margin-top:0.75rem;padding:0.75rem;border:1px solid var(--accent);
+         border-radius:var(--radius-sm);background:var(--accent-dim);font-size:0.85rem;"
+         hx-get="/api/v1/strategy/rescore-status" hx-trigger="every 3s" hx-swap="outerHTML">
+      <div style="display:flex;justify-content:space-between;margin-bottom:0.4rem;">
+        <strong>Re-scoring en cours ({s['triggered_by']})</strong>
+        <span>{s['done']}/{s['total']} ({pct}%)</span>
+      </div>
+      <div style="height:6px;background:var(--surface-3);border-radius:3px;overflow:hidden;">
+        <div style="height:100%;width:{pct}%;background:var(--accent);border-radius:3px;transition:width 0.3s;"></div>
+      </div>
+      <div style="margin-top:0.3rem;color:var(--muted);font-size:0.8rem;">{s['current']}</div>
+    </div>
+    """)
+
+
 @router.get("/api/v1/strategy/loop-status", response_class=HTMLResponse)
 async def loop_status(request: Request):
     """Polled every 5s by the UI to show live loop state."""

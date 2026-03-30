@@ -47,6 +47,14 @@
   score.
 </p>
 
+<!-- Re-scoring progress bar (visible when program changes trigger re-score) -->
+<div
+  id="rescore-area-pipeline"
+  hx-get="/api/v1/strategy/rescore-status"
+  hx-trigger="every 3s"
+  hx-swap="innerHTML"
+></div>
+
 <div id="review-area">
   {% if prospect %} {% include "partials/review_card.html" %} {% else %}
   <div class="empty-state">

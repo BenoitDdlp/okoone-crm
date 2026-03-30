@@ -24,6 +24,14 @@
   {% include "partials/loop_status.html" %}
 </div>
 
+<!-- Re-scoring progress (appears when program changes) -->
+<div
+  id="rescore-area"
+  hx-get="/api/v1/strategy/rescore-status"
+  hx-trigger="every 3s"
+  hx-swap="innerHTML"
+></div>
+
 <!-- ============================================================
      SECTION 2: THE PROGRAM
      This is the "brain" — Claude reads this document before every

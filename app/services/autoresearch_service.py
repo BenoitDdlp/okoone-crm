@@ -22,6 +22,120 @@ from app.config import settings
 from app.services.claude_advisor import _call_claude
 
 
+# Global rescore progress (visible from UI)
+RESCORE_STATE: dict = {
+    "active": False,
+    "total": 0,
+    "done": 0,
+    "current": "",
+    "triggered_by": "",
+}
+
+
+async def _rescore_all_screened(program_version: int) -> None:
+    """Re-score + re-analyze all screened prospects after a program change.
+
+    Runs in background. Updates RESCORE_STATE for progress tracking.
+    """
+    RESCORE_STATE["active"] = True
+    RESCORE_STATE["done"] = 0
+    RESCORE_STATE["triggered_by"] = f"Program v{program_version}"
+
+    try:
+        from app.database import get_db
+        from app.repositories.prospect_repo import ProspectRepository
+        from app.services.scoring_service import ScoringService
+
+        scoring = ScoringService()
+
+        async with get_db() as db:
+            # Get scoring weights
+            w_cursor = await db.execute(
+                "SELECT criteria_json FROM scoring_weights WHERE is_active = 1 LIMIT 1"
+            )
+            w_row = await w_cursor.fetchone()
+            if not w_row:
+                logger.warning("RESCORE: no scoring weights found")
+                return
+            weights = json.loads(w_row[0])
+
+            # Get all screened prospects
+            cursor = await db.execute(
+                "SELECT id, full_name FROM prospects WHERE status = 'screened' ORDER BY relevance_score DESC"
+            )
+            prospects = await cursor.fetchall()
+            RESCORE_STATE["total"] = len(prospects)
+            logger.info("RESCORE: starting re-score of %d screened prospects (program v%d)", len(prospects), program_version)
+
+            repo = ProspectRepository(db)
+
+            for i, row in enumerate(prospects):
+                pid, name = row[0], row[1] or "?"
+                RESCORE_STATE["done"] = i
+                RESCORE_STATE["current"] = name
+
+                prospect = await repo.find_by_id(pid)
+                if not prospect:
+                    continue
+
+                # Re-score
+                score, breakdown = await scoring.score_prospect(prospect, weights)
+                summary = scoring.generate_score_summary(breakdown, weights, prospect)
+                await repo.update(pid, {
+                    "relevance_score": score,
+                    "score_breakdown": json.dumps(breakdown),
+                    "score_summary": summary,
+                })
+
+            await db.commit()
+            RESCORE_STATE["done"] = len(prospects)
+            RESCORE_STATE["current"] = "Termine!"
+            logger.info("RESCORE: complete — %d prospects re-scored", len(prospects))
+
+            # Now re-run Claude deep analysis on top 10 (in background, takes time)
+            try:
+                from app.services.deep_analysis_service import DeepAnalysisService
+                deep_svc = DeepAnalysisService()
+
+                # Load program + acquaintances for analysis
+                svc = AutoresearchService()
+                _, program_content = await svc._load_program(db)
+                acquaintances = await svc._load_acquaintances(db)
+
+                # Get top 10 screened by new score
+                top_cursor = await db.execute(
+                    "SELECT id, full_name FROM prospects WHERE status = 'screened' "
+                    "AND experience_json IS NOT NULL AND experience_json != '' AND experience_json != '[]' "
+                    "ORDER BY relevance_score DESC LIMIT 10"
+                )
+                top_prospects = await top_cursor.fetchall()
+
+                RESCORE_STATE["current"] = f"Analyse Claude: 0/{len(top_prospects)}"
+                for j, tp in enumerate(top_prospects):
+                    pid = tp[0]
+                    prospect = await repo.find_by_id(pid)
+                    if not prospect:
+                        continue
+                    RESCORE_STATE["current"] = f"Analyse Claude: {j+1}/{len(top_prospects)} — {tp[1] or '?'}"
+                    try:
+                        analysis = await deep_svc.analyze_prospect(prospect, program_content, acquaintances)
+                        await repo.update(pid, {
+                            "claude_analysis": json.dumps(analysis, ensure_ascii=False),
+                        })
+                    except Exception:
+                        logger.error("RESCORE: Claude analysis failed for %d", pid, exc_info=True)
+
+                await db.commit()
+                logger.info("RESCORE: Claude analysis updated for %d prospects", len(top_prospects))
+            except Exception:
+                logger.error("RESCORE: Claude analysis step failed", exc_info=True)
+
+    except Exception:
+        logger.error("RESCORE: failed", exc_info=True)
+    finally:
+        RESCORE_STATE["active"] = False
+
+
 class AutoresearchService:
     """Orchestrates the prospect research loop."""
 
@@ -679,6 +793,11 @@ Objectif, Profil cible, Signaux positifs, etc. C'est le DOCUMENT COMPLET, pas un
             (new_version, new_content, author, version),
         )
         await db.commit()
+
+        # Trigger background re-scoring of all screened prospects
+        import asyncio
+        asyncio.create_task(_rescore_all_screened(new_version))
+
         return new_version
 
     # ------------------------------------------------------------------ #
