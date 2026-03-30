@@ -97,11 +97,11 @@
         if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA")
           return;
         var btn;
-        if (e.key === "ArrowLeft" || e.key === "j")
+        if (e.key === "ArrowLeft")
           btn = document.querySelector(".review-btn.reject");
-        if (e.key === "ArrowDown" || e.key === "k")
+        if (e.key === "ArrowDown")
           btn = document.querySelector(".review-btn.maybe");
-        if (e.key === "ArrowRight" || e.key === "l")
+        if (e.key === "ArrowRight")
           btn = document.querySelector(".review-btn.qualify");
         if (btn) btn.click();
       });

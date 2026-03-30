@@ -297,9 +297,10 @@
 <!-- Feedback input -->
 <div style="margin: 0.75rem 0; padding: 0 0.5rem">
   <textarea
+    name="feedback_text"
     id="review-feedback"
     rows="2"
-    placeholder="Feedback optionnel pour Claude (ex: 'pas de cambodge', 'plus de startups SaaS', 'ce profil est parfait, en trouver plus comme lui')"
+    placeholder="Feedback pour Claude (ex: 'pas de cambodge', 'plus de SaaS', 'profil parfait, en trouver plus')"
     style="
       width: 100%;
       font-size: 0.85rem;
@@ -316,44 +317,72 @@
 <div class="review-actions">
   <button
     class="review-btn reject"
-    hx-post="/api/v1/prospects/{{ prospect.id }}/review"
-    hx-target="#review-area"
-    hx-swap="innerHTML"
-    hx-on::before-request="this.setAttribute('hx-vals', JSON.stringify({verdict:'reject', feedback_text: document.getElementById('review-feedback').value}))"
-    hx-on::after-request="setTimeout(function(){window.location.href='/prospects'},300)"
     data-toast="Prospect rejete"
+    onclick="submitReview({{ prospect.id }}, 'reject')"
   >
-    <span>
-      <span class="btn-icon">&#10005;</span> Rejeter<br />
-      <span class="btn-hint"><span class="kbd">&larr;</span></span>
-    </span>
+    <span
+      ><span class="btn-icon">&#10005;</span> Rejeter<br /><span
+        class="btn-hint"
+        ><span class="kbd">&larr;</span></span
+      ></span
+    >
   </button>
   <button
     class="review-btn maybe"
-    hx-post="/api/v1/prospects/{{ prospect.id }}/review"
-    hx-target="#review-area"
-    hx-swap="innerHTML"
-    hx-on::before-request="this.setAttribute('hx-vals', JSON.stringify({verdict:'flag', feedback_text: document.getElementById('review-feedback').value}))"
-    hx-on::after-request="setTimeout(function(){window.location.href='/prospects'},300)"
     data-toast="Marque peut-etre"
+    onclick="submitReview({{ prospect.id }}, 'flag')"
   >
-    <span>
-      <span class="btn-icon">&#63;</span> Peut-etre<br />
-      <span class="btn-hint"><span class="kbd">&darr;</span></span>
-    </span>
+    <span
+      ><span class="btn-icon">&#63;</span> Peut-etre<br /><span class="btn-hint"
+        ><span class="kbd">&darr;</span></span
+      ></span
+    >
   </button>
   <button
     class="review-btn qualify"
-    hx-post="/api/v1/prospects/{{ prospect.id }}/review"
-    hx-target="#review-area"
-    hx-swap="innerHTML"
-    hx-on::before-request="this.setAttribute('hx-vals', JSON.stringify({verdict:'approve', feedback_text: document.getElementById('review-feedback').value}))"
-    hx-on::after-request="setTimeout(function(){window.location.href='/prospects'},300)"
     data-toast="Prospect qualifie !"
+    onclick="submitReview({{ prospect.id }}, 'approve')"
   >
-    <span>
-      <span class="btn-icon">&#10003;</span> Qualifier<br />
-      <span class="btn-hint"><span class="kbd">&rarr;</span></span>
-    </span>
+    <span
+      ><span class="btn-icon">&#10003;</span> Qualifier<br /><span
+        class="btn-hint"
+        ><span class="kbd">&rarr;</span></span
+      ></span
+    >
   </button>
 </div>
+<script>
+  function submitReview(prospectId, verdict) {
+    var feedback = document.getElementById("review-feedback");
+    var body = { verdict: verdict };
+    if (feedback && feedback.value.trim()) {
+      body.feedback_text = feedback.value.trim();
+    }
+    fetch("/api/v1/prospects/" + prospectId + "/review", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    })
+      .then(function (r) {
+        if (r.ok) {
+          showToast(
+            verdict === "approve"
+              ? "Prospect qualifie !"
+              : verdict === "reject"
+                ? "Prospect rejete"
+                : "Marque peut-etre",
+            "success",
+          );
+          setTimeout(function () {
+            window.location.href = "/prospects";
+          }, 400);
+        } else {
+          showToast("Erreur " + r.status, "error");
+        }
+      })
+      .catch(function (e) {
+        showToast("Erreur: " + e.message, "error");
+      });
+  }
+</script>
