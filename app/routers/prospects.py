@@ -89,6 +89,49 @@ templates = Jinja2Templates(directory="templates")
 PAGE_SIZE = 50
 
 
+@router.get("/{prospect_id}/card", response_class=HTMLResponse)
+async def get_prospect_card(request: Request, prospect_id: int):
+    """Return a rendered review card for a specific prospect (htmx partial)."""
+    async with get_db() as db:
+        repo = ProspectRepository(db)
+        prospect = await repo.find_by_id(prospect_id)
+        if not prospect:
+            return HTMLResponse("<div>Prospect introuvable</div>", status_code=404)
+        p = dict(prospect)
+        experiences, education, skills, traits = [], [], [], []
+        score_breakdown, claude_analysis = None, None
+        for field, var_name in [("experience_json", None), ("education_json", None),
+                                 ("skills_json", None), ("traits_json", None)]:
+            if p.get(field):
+                try:
+                    parsed = json.loads(p[field])
+                    if field == "experience_json": experiences = parsed
+                    elif field == "education_json": education = parsed
+                    elif field == "skills_json": skills = parsed
+                    elif field == "traits_json": traits = parsed
+                except (json.JSONDecodeError, TypeError):
+                    pass
+        if p.get("score_breakdown"):
+            try:
+                v = json.loads(p["score_breakdown"])
+                if isinstance(v, dict): score_breakdown = v
+            except (json.JSONDecodeError, TypeError):
+                pass
+        if p.get("claude_analysis"):
+            try:
+                v = json.loads(p["claude_analysis"])
+                if isinstance(v, dict): claude_analysis = v
+            except (json.JSONDecodeError, TypeError):
+                pass
+        html = templates.env.get_template("partials/review_card.html").render({
+            "request": request, "prospect": p,
+            "experiences": experiences, "education": education,
+            "skills": skills, "traits": traits,
+            "score_breakdown": score_breakdown, "claude_analysis": claude_analysis,
+        })
+        return HTMLResponse(html)
+
+
 @router.get("/")
 async def list_prospects(
     status: Optional[str] = None,
