@@ -115,12 +115,9 @@
       <tbody>
         {% for p in all_prospects %}
         <tr
-          hx-get="/api/v1/prospects/{{ p.id }}/card"
-          hx-target="#review-area"
-          hx-swap="innerHTML"
-          hx-on::after-request="document.getElementById('review-area').scrollIntoView({behavior:'smooth'})"
           class="prospect-row"
           style="cursor: pointer"
+          onclick="loadProspectCard({{ p.id }})"
         >
           <td class="td-rank">{{ loop.index + ((page - 1) * 50) }}</td>
           <td>
