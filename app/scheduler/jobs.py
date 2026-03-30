@@ -494,14 +494,20 @@ async def run_research_loop() -> None:
                     logger.error("Failed to record query performance for '%s':", kw, exc_info=True)
             await db.commit()
 
-            # --- Step 7: Claude proposes improvements ---
+            # --- Step 7: Claude proposes improvements (Karpathy keep/discard) ---
+            # Philosophy: measure results, propose change, keep if better, discard if worse.
+            # The metric is human_approval_rate (our val_bpb equivalent).
             LOOP_STATE["status"] = "proposing"
             LOOP_STATE["current_step"] = "Claude analyse les metriques et propose des ameliorations..."
+            proposal = {}
             try:
                 proposal = await research.propose_program_improvement(db)
+                if proposal.get("proposed_program"):
+                    logger.info("KARPATHY: proposal generated (%d chars)", len(proposal["proposed_program"]))
+                else:
+                    logger.info("KARPATHY: no valid program in proposal (analysis only or empty)")
             except Exception as e:
-                logger.warning("Program improvement proposal failed: %s", str(e)[:100])
-                proposal = {}
+                logger.error("KARPATHY: proposal generation failed: %s", str(e)[:200], exc_info=True)
 
             # Update run record with proposal
             if proposal:
@@ -517,8 +523,19 @@ async def run_research_loop() -> None:
                 ))
                 await db.commit()
 
-            # --- Step 7.5: Auto-accept improvements if configured ---
-            if settings.AUTO_ACCEPT_IMPROVEMENTS and proposal.get("proposed_program"):
+            # --- Step 7.5: Karpathy keep/discard decision ---
+            # Auto-accept if:
+            # 1. AUTO_ACCEPT_IMPROVEMENTS is True
+            # 2. The proposal contains a valid program
+            # 3. We had results this cycle (don't change program on empty cycles)
+            #    UNLESS we've had 5+ empty cycles (need radical change)
+            should_accept = (
+                settings.AUTO_ACCEPT_IMPROVEMENTS
+                and proposal.get("proposed_program")
+                and (total_new > 0 or LOOP_STATE["consecutive_empty_runs"] >= 5)
+            )
+
+            if should_accept:
                 try:
                     new_version = await research.apply_program(
                         db, proposal["proposed_program"], author="claude-auto"
@@ -528,9 +545,19 @@ async def run_research_loop() -> None:
                         (current_run_id,),
                     )
                     await db.commit()
-                    logger.info("AUTO-ACCEPTED program v%d from run %d", new_version, current_run_id)
+                    logger.info("KARPATHY KEEP: program v%d accepted (run#%d, found=%d, empty_streak=%d)",
+                                new_version, current_run_id, total_new, LOOP_STATE["consecutive_empty_runs"])
                 except Exception:
-                    logger.error("Failed to auto-accept program improvement:", exc_info=True)
+                    logger.error("KARPATHY: failed to apply program:", exc_info=True)
+            elif proposal.get("proposed_program"):
+                # Valid proposal but conditions not met — discard
+                await db.execute(
+                    "UPDATE research_runs SET proposal_status = 'discarded' WHERE id = ?",
+                    (current_run_id,),
+                )
+                await db.commit()
+                logger.info("KARPATHY DISCARD: proposal discarded (found=%d, empty_streak=%d, auto_accept=%s)",
+                            total_new, LOOP_STATE["consecutive_empty_runs"], settings.AUTO_ACCEPT_IMPROVEMENTS)
 
         # --- Step 8: Update state + failure detection ---
         LOOP_STATE["status"] = "sleeping"
