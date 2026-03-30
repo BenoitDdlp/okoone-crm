@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{% block title %}Okoone CRM{% endblock %}</title>
-    <link rel="stylesheet" href="/static/style.css?v=6" />
+    <link rel="stylesheet" href="/static/style.css?v=7" />
     <script src="https://unpkg.com/htmx.org@2.0.4"></script>
     <script
       defer
@@ -20,20 +20,13 @@
             href="/prospects"
             class="{{ 'active' if active_nav == 'pipeline' else '' }}"
           >
-            <span class="nav-icon">&#9678;</span> Pipeline {% if pending_count
-            %}<span class="nav-badge">{{ pending_count }}</span>{% endif %}
+            <span class="nav-icon">&#9678;</span> Prospects
           </a>
           <a
             href="/strategy"
             class="{{ 'active' if active_nav == 'strategy' else '' }}"
           >
             <span class="nav-icon">&#9881;</span> Strategie
-          </a>
-          <a
-            href="/campaigns"
-            class="{{ 'active' if active_nav == 'outreach' else '' }}"
-          >
-            <span class="nav-icon">&#9993;</span> Outreach
           </a>
         </nav>
         <div class="sidebar-bottom">

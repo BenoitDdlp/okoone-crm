@@ -136,23 +136,8 @@ async def searches_page(request: Request):
 
 @router.get("/campaigns", response_class=HTMLResponse)
 async def campaigns_page(request: Request):
-    """Outreach page."""
-    async with get_db() as db:
-        cursor = await db.execute("""
-            SELECT ec.*,
-                   (SELECT COUNT(*) FROM email_enrollments WHERE campaign_id = ec.id) as enrolled_count,
-                   (SELECT COUNT(*) FROM email_sends es
-                    JOIN email_enrollments ee ON es.enrollment_id = ee.id
-                    WHERE ee.campaign_id = ec.id AND es.status = 'sent') as sent_count
-            FROM email_campaigns ec ORDER BY ec.created_at DESC
-        """)
-        campaigns = [dict(r) for r in await cursor.fetchall()]
-
-    return templates.TemplateResponse(
-        request,
-        "campaigns.html",
-        {"campaigns": campaigns, "active_nav": "outreach"},
-    )
+    """Redirect to prospects (outreach page removed)."""
+    return RedirectResponse(url="/prospects", status_code=302)
 
 
 @router.get("/eval", response_class=HTMLResponse)

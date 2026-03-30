@@ -63,6 +63,31 @@ async def strategy_page(request: Request):
     )
 
 
+@router.get("/api/v1/strategy/loop-status-compact", response_class=HTMLResponse)
+async def loop_status_compact(request: Request):
+    """Compact one-line loop status for the Prospects page banner."""
+    loop = _get_loop_state(request)
+    if not loop.get("active"):
+        dot = "background:var(--muted)"
+        text = "Boucle inactive"
+    elif loop.get("status") == "sleeping":
+        dot = "background:var(--success)"
+        text = f"Boucle active — {loop.get('cycles_completed', 0)} cycles, {loop.get('total_prospects_found', 0)} prospects trouves"
+    elif loop.get("status") == "session_expired":
+        dot = "background:var(--error)"
+        text = "Session LinkedIn expiree"
+    elif loop.get("last_error"):
+        dot = "background:var(--error)"
+        text = f"Erreur: {loop['last_error'][:60]}"
+    else:
+        dot = "background:var(--accent);animation:pulse 1s infinite"
+        step = loop.get("current_step", "en cours...")
+        text = step[:80]
+    return HTMLResponse(
+        f'<span style="width:8px;height:8px;border-radius:50%;{dot};display:inline-block;flex-shrink:0;"></span> {text}'
+    )
+
+
 @router.get("/api/v1/strategy/rescore-status", response_class=HTMLResponse)
 async def rescore_status():
     """Polled by UI to show re-scoring progress after program change."""

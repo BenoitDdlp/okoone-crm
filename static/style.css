@@ -233,8 +233,8 @@ a:hover {
   display: flex;
   gap: 1rem;
   justify-content: center;
-  max-width: 800px;
-  margin: 0 auto 2rem;
+  max-width: none;
+  margin: 0 0 2rem;
 }
 
 .review-btn {
@@ -865,8 +865,8 @@ tr:hover td {
   border-radius: var(--radius);
   padding: 2rem 2.25rem;
   box-shadow: var(--shadow);
-  max-width: 800px;
-  margin: 0 auto 1.5rem;
+  max-width: none;
+  margin: 0 0 1.5rem;
   position: relative;
   transition:
     transform 0.3s,

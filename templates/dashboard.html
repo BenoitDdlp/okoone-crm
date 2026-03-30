@@ -1,14 +1,41 @@
-{% extends "base.html" %} {% block title %}Pipeline — Okoone CRM{% endblock %}
+{% extends "base.html" %} {% block title %}Prospects — Okoone CRM{% endblock %}
 {% block content %}
 <div class="page-header">
-  <h1>Pipeline</h1>
+  <h1>Prospects</h1>
   <p class="page-desc">
-    Ici tu qualifies les prospects trouves par Claude. Chaque carte est un lead
-    potentiel. Clique Qualifier, Peut-etre, ou Rejeter — ou utilise les fleches
-    du clavier
-    <span class="kbd">&larr;</span> <span class="kbd">&darr;</span>
-    <span class="kbd">&rarr;</span>
+    Qualifie les prospects trouves par Claude. Fleches clavier :
+    <span class="kbd">&larr;</span> rejeter
+    <span class="kbd">&darr;</span> peut-etre
+    <span class="kbd">&rarr;</span> qualifier
   </p>
+</div>
+
+<!-- Compact loop status banner -->
+<div
+  id="loop-banner"
+  style="
+    margin-bottom: 0.75rem;
+    font-size: 0.82rem;
+    color: var(--muted);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  "
+  hx-get="/api/v1/strategy/loop-status-compact"
+  hx-trigger="every 10s"
+  hx-swap="innerHTML"
+>
+  <span
+    class="loop-dot"
+    style="
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--success);
+      display: inline-block;
+    "
+  ></span>
+  Boucle active — prochain cycle bientot
 </div>
 
 <!-- Stats -->
