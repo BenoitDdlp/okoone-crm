@@ -555,6 +555,65 @@ class LinkedInScraper:
             except Exception:
                 logger.error("Enhanced fallback extraction failed", exc_info=True)
 
+        # ULTIMATE FALLBACK: parse visible text + extract /in/ URLs from page source
+        # This handles the case where both JS extractors fail (LinkedIn changed DOM)
+        if not results:
+            logger.info("Both JS extractors failed — trying text+URL ultimate fallback...")
+            try:
+                # Get all /in/ URLs from page HTML (not DOM — raw source)
+                page_url_results = await self._page.evaluate("""() => {
+                    // Get ALL href attributes from the entire page
+                    const allAs = document.querySelectorAll('a');
+                    const profiles = new Map();
+                    for (const a of allAs) {
+                        const href = a.getAttribute('href') || '';
+                        const m = href.match(/\\/in\\/([a-zA-Z0-9_-]{3,100})\\/?/);
+                        if (!m) continue;
+                        const username = m[1];
+                        if (/^ACoA/.test(username)) continue;
+                        if (profiles.has(username)) continue;
+
+                        // Get name: try aria-label first
+                        let name = '';
+                        const ariaLabel = a.getAttribute('aria-label') || '';
+                        if (ariaLabel) {
+                            // "View X's profile" or "Voir le profil de X"
+                            name = ariaLabel
+                                .replace(/^View\\s+/i, '')
+                                .replace(/\\u2019s profile$/i, '')
+                                .replace(/'s profile$/i, '')
+                                .replace(/\\u2019s profil$/i, '')
+                                .trim();
+                        }
+                        if (!name || name.length < 2) {
+                            // Try textContent
+                            const tc = (a.textContent || '').trim().split('\\n')[0].trim();
+                            if (tc.length > 1 && tc.length < 60) name = tc;
+                        }
+                        if (!name || name.length < 2) continue;
+
+                        // Skip noise
+                        const noise = ['Join LinkedIn','LinkedIn Member','Sign in','Provides services','Status is'];
+                        if (noise.some(n => name.startsWith(n))) continue;
+
+                        profiles.set(username, {username, name});
+                    }
+                    return Array.from(profiles.values());
+                }""")
+
+                for p in page_url_results:
+                    results.append({
+                        "full_name": p["name"],
+                        "headline": "",
+                        "location": "",
+                        "linkedin_url": f"https://www.linkedin.com/in/{p['username']}/",
+                        "profile_username": p["username"],
+                    })
+
+                logger.info("Ultimate fallback: extracted %d profiles from page links", len(results))
+            except Exception:
+                logger.error("Ultimate fallback failed", exc_info=True)
+
         # Retry logic: if we still got 0 results, reload and try once more
         if not results and not getattr(self, '_search_retried', False):
             self._search_retried = True
