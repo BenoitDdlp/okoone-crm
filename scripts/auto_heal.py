@@ -110,8 +110,28 @@ async def check_and_fix_session() -> bool:
                 await ctx.close()
                 return True
 
-        # Try credential login
+        # Try credential login (with fresh profile if needed)
         log("Welcome Back failed — trying credentials...")
+        await ctx.close()
+        await pw.stop()
+
+        # If login page doesn't even load, the profile is corrupted.
+        # Nuke it and start fresh.
+        log("Nuking corrupted profile and starting fresh...")
+        import shutil
+        if os.path.exists(PROFILE_DIR):
+            shutil.rmtree(PROFILE_DIR)
+        os.makedirs(PROFILE_DIR, exist_ok=True)
+
+        pw = await async_playwright().start()
+        ctx = await pw.chromium.launch_persistent_context(
+            user_data_dir=PROFILE_DIR,
+            headless=True,
+            args=["--disable-blink-features=AutomationControlled", "--no-sandbox"],
+            ignore_default_args=["--enable-automation"],
+        )
+        page = ctx.pages[0] if ctx.pages else await ctx.new_page()
+
         try:
             await page.goto("https://www.linkedin.com/login",
                             wait_until="domcontentloaded", timeout=15000)

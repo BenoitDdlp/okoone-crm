@@ -13,6 +13,7 @@ Architecture: Claude = brain, Patchright = hands.
 import asyncio
 import json
 import logging
+import os
 import random
 import traceback
 from datetime import datetime
@@ -50,33 +51,60 @@ async def _auto_relogin(scraper) -> bool:
     cookie expired but the profile still has the account saved, we can
     click the account card to re-authenticate without credentials.
     """
-    page = scraper._page
-    if not page:
-        return False
-
     try:
+        page = scraper._page
+        if not page:
+            return False
+
+        # Step 1: Try Welcome Back
         await page.goto("https://www.linkedin.com/login", wait_until="domcontentloaded", timeout=15000)
         await asyncio.sleep(3)
 
         body = await page.inner_text("body")
-        if "Welcome Back" not in body and "Welcome back" not in body:
-            logger.info("No Welcome Back page — manual login required")
-            return False
+        if "Welcome Back" in body or "Welcome back" in body:
+            cards = await page.query_selector_all("div[role='button'], button, a")
+            for card in cards:
+                text = (await card.text_content() or "").lower()
+                if "gmail" in text or "benoit" in text or "ddlp" in text:
+                    logger.info("Auto-clicking Welcome Back account card...")
+                    await card.click()
+                    await asyncio.sleep(8)
+                    break
+            if "/feed" in page.url:
+                return True
 
-        # Find and click the account card
-        cards = await page.query_selector_all("div[role='button'], button, a")
-        for card in cards:
-            text = (await card.text_content() or "").lower()
-            if "gmail" in text or "benoit" in text or "ddlp" in text:
-                logger.info("Auto-clicking Welcome Back account card...")
-                await card.click()
-                await asyncio.sleep(8)
-                break
+        # Step 2: Nuke profile + fresh credential login
+        logger.info("Welcome Back failed — nuking profile and fresh login...")
+        await scraper.stop()
+        import shutil
+        profile_dir = scraper._profile_dir
+        if os.path.exists(profile_dir):
+            shutil.rmtree(profile_dir)
+        os.makedirs(profile_dir, exist_ok=True)
 
-        url = page.url
-        if "/feed" in url:
+        await scraper.start()
+        page = scraper._page
+        await page.goto("https://www.linkedin.com/login", wait_until="domcontentloaded", timeout=15000)
+        await asyncio.sleep(2)
+        await page.fill("#username", "benoitddlp82@gmail.com")
+        await asyncio.sleep(0.5)
+        await page.evaluate("""() => {
+            document.getElementById("password").value = "$P53qLop34Cq#skN";
+            document.getElementById("password").dispatchEvent(new Event("input", {bubbles: true}));
+        }""")
+        await asyncio.sleep(0.3)
+        await page.click("button[type=submit]")
+        await asyncio.sleep(8)
+
+        if "/feed" in page.url:
+            logger.info("AUTO-RELOGIN SUCCESS via fresh profile + credentials")
             return True
 
+        # Check for security challenge
+        if "challenge" in page.url or "checkpoint" in page.url:
+            logger.warning("AUTO-RELOGIN: security challenge detected — needs manual intervention")
+        else:
+            logger.warning("AUTO-RELOGIN failed — post-login URL: %s", page.url)
         return False
 
     except Exception:
