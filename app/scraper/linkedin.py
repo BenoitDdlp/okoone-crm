@@ -328,10 +328,16 @@ class LinkedInScraper:
 
         logger.info("Searching LinkedIn people: %s (page %d)", keywords, page)
         await self._page.goto(query, wait_until="domcontentloaded")
-        await self._human_scroll()
 
-        # Wait for JS rendering
-        await asyncio.sleep(random.uniform(2.0, 4.0))
+        # Wait for LinkedIn to render search results (they load via JS after DOM ready)
+        try:
+            await self._page.wait_for_selector('a[href*="/in/"]', timeout=10000)
+            logger.info("Search results loaded (found /in/ links)")
+        except Exception:
+            logger.info("No /in/ links after 10s — page may be empty or slow")
+
+        await self._human_scroll()
+        await asyncio.sleep(random.uniform(3.0, 6.0))  # Extra wait for lazy-loaded results
 
         # Extract results via JS — more reliable than HTML regex parsing
         # LinkedIn obfuscates class names, but href="/in/..." and data attributes are stable
