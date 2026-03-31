@@ -450,58 +450,77 @@ class AutoresearchService:
             best_text = "Pas encore de donnees (premier cycle)."
             worst_text = "Pas encore de donnees."
 
+        # Count existing prospects per location for diversity tracking
+        async with db.execute(
+            "SELECT location, COUNT(*) as c FROM prospects WHERE location IS NOT NULL AND location != '' "
+            "GROUP BY location ORDER BY c DESC LIMIT 10"
+        ) as cursor:
+            location_dist = [f"{r[0]}: {r[1]}" for r in await cursor.fetchall()]
+        loc_text = "\n".join(f"- {l}" for l in location_dist) if location_dist else "Pas encore de donnees."
+
         prompt = f"""## Programme de recherche (v{version})
 {program}
 
 ## Acquaintances de reference
 {acq_text}
 
-## Derniers resultats (30 recents)
-{recent}
+## Distribution geographique actuelle des prospects
+{loc_text}
 
-## Keywords DEJA UTILISES (ne PAS les reutiliser)
+## Keywords DEJA UTILISES ({len(used_keywords)} queries au total — NE PAS reutiliser ces EXACT keywords)
 {used_text}
 
-## QUERIES LES PLUS PERFORMANTES (a s'inspirer, mais varier)
+## QUERIES LES PLUS PERFORMANTES
 {best_text}
 
-## QUERIES SOUS-PERFORMANTES (a eviter ou reformuler)
+## QUERIES SOUS-PERFORMANTES
 {worst_text}
 
 ---
 
-## REGLES CRITIQUES POUR LA GENERATION DE QUERIES
+## INSTRUCTIONS: GENERE 10 QUERIES CREATIVES ET VARIEES
 
-**LinkedIn search fonctionne avec des queries COURTES et LARGES.**
-La recherche LinkedIn est un moteur simple, PAS Google. Plus tu mets de mots-cles, moins tu obtiens de resultats.
+Tu dois trouver des prospects JAMAIS VUS. On a deja {total} prospects.
+Les queries classiques (CTO, VP Engineering, Head of Digital) sont EPUISEES.
 
-### REGLE 1: Maximum 2-3 mots-cles par query
-- BONNE query: "CTO Singapore" (2 mots → beaucoup de resultats)
-- BONNE query: "VP Engineering Bangkok" (3 mots → bons resultats)
-- BONNE query: "Head of Digital Singapore" (4 mots → acceptable)
-- MAUVAISE query: "CTO proptech seed funding Jakarta Indonesia" (6 mots → 0 resultats)
-- MAUVAISE query: "VP Engineering SaaS B2B fintech" (5 mots → 0 resultats)
+### STRATEGIES DE DIVERSIFICATION (utilise TOUTES ces approches):
 
-### REGLE 2: Utilise le champ location SEPAREMENT des keywords
-- CORRECT: keywords="CTO", location="Singapore" → LinkedIn filtre par geo
-- INCORRECT: keywords="CTO Singapore" → cherche "CTO Singapore" dans le texte
+**1. NOUVEAUX TITRES** — explore au-dela des C-level:
+- "technical architect", "platform lead", "engineering director"
+- "digital transformation manager", "innovation lead"
+- "tech lead startup", "product engineering manager"
+- "solutions architect", "DevOps director", "cloud architect"
 
-### REGLE 3: TOUJOURS inclure au moins 2 queries pour Singapore (marche principal)
-Singapore est notre marche prioritaire. Chaque plan doit avoir minimum 2 queries ciblant Singapore.
+**2. PAR INDUSTRIE** — cherche des gens dans les bons secteurs:
+- "fintech engineer", "healthtech product", "edtech founder"
+- "e-commerce technology", "logistics tech", "proptech developer"
+- "SaaS startup", "AI company", "blockchain startup"
 
-### REGLE 4: Privilegie les titres generiques
-Exemples de bons keywords: "CTO", "VP Engineering", "Head of Digital", "IT Director",
-"Chief Technology Officer", "Software Engineering Lead", "Director of Engineering",
-"Head of Product", "VP Technology", "Digital Transformation Director"
+**3. PAR ENTREPRISE** — cible des entreprises connues dans la region:
+- "Grab engineering", "Shopee technology", "Gojek product"
+- "DBS Bank digital", "SEA Group engineering"
+- "Lazada technology", "Tokopedia product"
 
-### REGLE 5: NE JAMAIS combiner titre + secteur + stage + pays dans les keywords
-Chaque mot supplementaire DIVISE le nombre de resultats par 5-10x.
+**4. PAR SKILL/TECHNOLOGIE**:
+- "React Native Singapore", "AWS architect Singapore"
+- "microservices lead", "Kubernetes Singapore"
+- "machine learning Singapore", "data engineering lead"
 
-Genere 5-8 requetes de recherche LinkedIn NOUVELLES et DIFFERENTES des keywords deja utilises.
-Inspire-toi des queries performantes pour trouver des angles similaires mais nouveaux.
-Evite les patterns des queries sous-performantes.
-Varie les titres, secteurs, localisations, et formulations pour maximiser la diversite des prospects.
-Pour chaque requete, donne:
+**5. PAR RESEAU** — les connexions de nos bons prospects:
+- Cherche dans les memes entreprises que nos meilleurs prospects
+- Cherche des titres similaires dans des villes differentes
+
+**6. LOCALISATIONS SOUS-EXPLOREES** (regarde la distribution ci-dessus):
+- Si trop de Singapore, essaie: Kuala Lumpur, Manila, Taipei, Mumbai
+- Villes secondaires: Cebu, Penang, Chiang Mai, Da Nang
+
+### REGLES TECHNIQUES:
+- Max 2-3 mots par keyword (LinkedIn search est basique)
+- Utilise le champ "location" SEPAREMENT
+- Au moins 2 queries Singapore + 2 autres localisations SEA
+- Chaque query DOIT etre DIFFERENTE de toutes celles deja utilisees
+
+Genere exactement 10 queries. Pour chaque:
 - keywords: les mots-cles LinkedIn (2-3 mots MAXIMUM, DIFFERENTS des precedents)
 - location: la localisation (utilise ce champ au lieu de mettre le pays dans keywords)
 - reasoning: pourquoi cette requete est pertinente (reference les donnees de performance si applicable)

@@ -314,7 +314,7 @@ async def trigger_research_run(request: Request):
         errors: list[str] = []
 
         # Step 4: Scrape LinkedIn with Patchright (real scraping!)
-        for q in queries[:5]:  # Max 5 per manual run (new account safety)
+        for q in queries[:10]:  # Max 10 per manual run
             kw = q["keywords"]
             loc = q.get("location")
             try:

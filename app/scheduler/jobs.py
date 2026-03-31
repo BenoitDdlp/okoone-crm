@@ -163,7 +163,7 @@ async def run_research_loop() -> None:
                 queries = EMERGENCY_QUERIES
 
             if session_valid:
-                for i, q in enumerate(queries[:5]):
+                for i, q in enumerate(queries[:10]):
                     kw = q["keywords"]
                     loc = q.get("location")
                     query_key = f"{kw}||{loc or ''}"
@@ -178,7 +178,7 @@ async def run_research_loop() -> None:
 
                         # Paginate up to 10 pages (~100 results per query)
                         if results:
-                            for pg in range(2, 11):
+                            for pg in range(2, 51):  # Up to 50 pages (~500 results per query)
                                 await asyncio.sleep(random.uniform(2.0, 5.0))
                                 try:
                                     pg_results = await _scraper.search_people(kw, loc, page=pg)
