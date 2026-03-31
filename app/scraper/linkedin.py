@@ -224,17 +224,13 @@ class LinkedInScraper:
 
         logger.info("Starting browser with profile: %s", self._profile_dir)
         self._pw = await async_playwright().start()
+        # Match the exact args that work in standalone testing
+        # (no custom user_agent, minimal args)
         self._browser = await self._pw.chromium.launch_persistent_context(
             user_data_dir=self._profile_dir,
             headless=True,
-            viewport={
-                "width": 1280 + random.randint(-50, 50),
-                "height": 800 + random.randint(-50, 50),
-            },
-            user_agent=get_random_user_agent(),
             args=[
                 "--disable-blink-features=AutomationControlled",
-                "--disable-dev-shm-usage",
                 "--no-sandbox",
             ],
             ignore_default_args=["--enable-automation"],
