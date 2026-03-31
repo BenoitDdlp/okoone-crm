@@ -352,6 +352,11 @@ class LinkedInScraper:
 
         logger.info("Raw /in/ links found: %d", len(raw_links))
 
+        # Debug: log first 3 raw links to understand the data
+        for i, link in enumerate(raw_links[:3]):
+            logger.info("  raw_link[%d]: href=%s label=%s text=%s",
+                        i, link.get("href", "")[:60], repr(link.get("label", ""))[:60], repr(link.get("text", ""))[:60])
+
         results: list[dict[str, str]] = []
         seen: set[str] = set()
         for link in raw_links:
@@ -361,18 +366,23 @@ class LinkedInScraper:
                 continue
             username = m.group(1)
             if username.startswith("ACoA"):
+                logger.debug("  SKIP ACoA: %s", username)
                 continue
             if username in seen:
                 continue
             seen.add(username)
 
-            # Extract name from aria-label ("View X\u2019s profile")
+            # Extract name from aria-label ("View X's profile")
             name = ""
             label = link.get("label", "")
             if label:
-                # Strip "View " prefix and "'s profile" suffix (curly + straight quotes)
+                # Strip "View " prefix and "'s profile" suffix
+                # Handle curly apostrophes AND straight quotes AND Unicode
                 name = re.sub(r"^View\s+", "", label)
-                name = re.sub(r"[\u2018\u2019\u0027]s\s+profile$", "", name, flags=re.IGNORECASE)
+                name = re.sub(r"[\u2018\u2019\u0027\u2032\u02BC]s\s+profile.*$", "", name, flags=re.IGNORECASE)
+                name = re.sub(r"\u2019s\s+profile.*$", "", name, flags=re.IGNORECASE)
+                name = re.sub(r"'s\s+profile.*$", "", name, flags=re.IGNORECASE)
+                name = re.sub(r"\u2019s profile.*$", "", name, flags=re.IGNORECASE)
                 name = name.strip()
 
             # Fallback: first line of text content
@@ -383,8 +393,10 @@ class LinkedInScraper:
 
             # Skip garbage
             if not name or len(name) < 2:
+                logger.debug("  SKIP empty name for %s (label=%s)", username, repr(label)[:40])
                 continue
             if _is_garbage_name(name):
+                logger.debug("  SKIP garbage name: %s", name)
                 continue
 
             results.append({
