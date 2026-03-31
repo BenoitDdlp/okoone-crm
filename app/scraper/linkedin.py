@@ -12,7 +12,7 @@ import logging
 import random
 from urllib.parse import quote
 
-import re as _re
+import re
 
 from app.scraper.parser import parse_search_results
 from app.scraper.rate_limiter import RateLimiter
@@ -24,10 +24,10 @@ logger = logging.getLogger(__name__)
 # ------------------------------------------------------------------ #
 
 _GARBAGE_NAME_PATTERNS = [
-    _re.compile(r"^Status is (offline|online|reachable)$", _re.IGNORECASE),
-    _re.compile(r"View .+[\u2018\u2019']s\s+profile", _re.IGNORECASE),
-    _re.compile(r"^Provides services", _re.IGNORECASE),
-    _re.compile(r"^ACoA"),
+    re.compile(r"^Status is (offline|online|reachable)$", re.IGNORECASE),
+    re.compile(r"View .+[\u2018\u2019']s\s+profile", re.IGNORECASE),
+    re.compile(r"^Provides services", re.IGNORECASE),
+    re.compile(r"^ACoA"),
 ]
 
 _GARBAGE_NAME_PREFIXES = [
@@ -35,8 +35,8 @@ _GARBAGE_NAME_PREFIXES = [
     "Provides services", "ACoAA", "ACoA",
 ]
 
-_VIEW_PROFILE_SUFFIX = _re.compile(
-    r"View\s+.+[\u2018\u2019']s\s+profile\s*$", _re.IGNORECASE
+_VIEW_PROFILE_SUFFIX = re.compile(
+    r"View\s+.+[\u2018\u2019']s\s+profile\s*$", re.IGNORECASE
 )
 
 
@@ -94,7 +94,7 @@ def _sanitize_search_results(results: list[dict[str, str]]) -> list[dict[str, st
 
         if name_is_bad:
             # Try to recover name from headline ("RealNameView RealName's profile")
-            m = _re.search(
+            m = re.search(
                 r"View\s+(.+?)[\u2018\u2019']\s*s\s+profile\s*$", headline
             )
             if m:
@@ -124,7 +124,7 @@ def _sanitize_search_results(results: list[dict[str, str]]) -> list[dict[str, st
         headline = _VIEW_PROFILE_SUFFIX.sub("", headline).strip()
 
         # Clean location: remove status indicators and profile view text
-        if _re.match(r"^Status is ", location, _re.IGNORECASE):
+        if re.match(r"^Status is ", location, re.IGNORECASE):
             location = ""
         if "View " in location and "profile" in location:
             location = ""
