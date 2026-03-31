@@ -339,286 +339,69 @@ class LinkedInScraper:
         await self._human_scroll()
         await asyncio.sleep(random.uniform(3.0, 6.0))  # Extra wait for lazy-loaded results
 
-        # Extract results via JS — more reliable than HTML regex parsing
-        # LinkedIn obfuscates class names, but href="/in/..." and data attributes are stable
-        results = await self._page.evaluate("""() => {
-            const cards = document.querySelectorAll('[data-view-name="search-entity-result-universal-template"]');
-            const results = [];
-            const SKIP = ['Status is online', 'Status is offline', 'Status is reachable',
-                          'Connect', 'Follow', 'Message', 'Pending', 'Send InMail'];
-
-            // Helper: strip "View X's profile" prefix+suffix
-            // Handles curly apostrophes (\u2018 \u2019), straight quote, and HTML entities
-            function stripViewProfile(s) {
-                // First try to extract the name from "View <name>'s profile"
-                const m = s.match(/^View\\s+(.+?)[\\u2018\\u2019\\u0027\u2018\u2019']s\\s+profile$/i);
-                if (m) return m[1].trim();
-                // Fallback: just strip suffixes
-                return s.replace(/[\\u2018\\u2019\\u0027\u2018\u2019']s\\s+profile$/i, '')
-                        .replace(/^View\\s+/i, '')
-                        .trim();
-            }
-            // Helper: check if text is noise (status indicators, profile view text, buttons, garbage names)
-            function isNoise(t) {
-                if (SKIP.includes(t)) return true;
-                if (/^Status is /i.test(t)) return true;
-                if (/^View /i.test(t) && /profile/i.test(t)) return true;
-                if (/[\\u2018\\u2019']s\\s+profile$/i.test(t)) return true;
-                if (/^Join LinkedIn/i.test(t)) return true;
-                if (/^LinkedIn Member/i.test(t)) return true;
-                if (/^Sign in/i.test(t)) return true;
-                if (/^Provides services/i.test(t)) return true;
-                if (/^ACoA/.test(t)) return true;
-                if (t.length > 80) return true;
-                return false;
-            }
-
-            for (const card of cards) {
-                const link = card.querySelector('a[href*="/in/"]');
-                if (!link) continue;
-                const href = link.getAttribute('href') || '';
-                const usernameMatch = href.match(/\\/in\\/([^/?]+)/);
-                if (!usernameMatch) continue;
-                // Skip ACoAA internal IDs — they cannot be deep-screened
-                if (/^ACoA/.test(usernameMatch[1])) continue;
-
-                // Get the name from the link's aria-label or span[aria-hidden="true"]
-                let name = '';
-                const ariaLabel = link.getAttribute('aria-label');
-                if (ariaLabel) {
-                    name = stripViewProfile(ariaLabel);
-                }
-                if (!name || isNoise(name)) {
-                    name = '';
-                    const hiddenSpan = link.querySelector('span[aria-hidden="true"]');
-                    if (hiddenSpan) {
-                        const t = hiddenSpan.textContent.trim();
-                        if (!isNoise(t)) name = t;
-                    }
-                }
-
-                // Collect meaningful text spans (skip status/buttons)
-                const texts = [];
-                card.querySelectorAll('span').forEach(s => {
-                    const t = s.textContent.trim();
-                    if (t && t.length > 2 && t.length < 200
-                        && !isNoise(t)
-                        && t !== name) {
-                        texts.push(t);
-                    }
-                });
-
-                // Headline is usually the first text after name
-                // Location is after connection degree
-                let headline = '';
-                let location = '';
-                let pastDegree = false;
-                for (const t of texts) {
-                    if (/^\\d+(st|nd|rd|th)$/.test(t) || t.includes('1st') || t.includes('2nd') || t.includes('3rd')) {
-                        pastDegree = true;
-                        continue;
-                    }
-                    if (!headline) {
-                        headline = t;
-                    } else if (pastDegree && !location && t.length > 2) {
-                        location = t;
-                        break;
-                    }
-                }
-
-                if (name) {
-                    results.push({
-                        full_name: name,
-                        headline: headline,
-                        location: location,
-                        linkedin_url: 'https://www.linkedin.com/in/' + usernameMatch[1] + '/',
-                        profile_username: usernameMatch[1],
-                    });
-                }
-            }
-            return results;
+        # ============================================================
+        # PYTHON-BASED PARSER — minimal JS, parse in Python
+        # Uses r-string to avoid double-escape issues with regex
+        # Proven to work in standalone tests (found 3/6 links)
+        # ============================================================
+        raw_links = await self._page.evaluate(r"""() => {
+            return Array.from(document.querySelectorAll('a'))
+                .filter(a => a.href && a.href.includes('/in/'))
+                .map(a => ({
+                    href: a.href,
+                    label: a.getAttribute('aria-label') || '',
+                    text: (a.textContent || '').trim().substring(0, 100)
+                }))
         }""")
 
-        logger.info("Extracted %d results via JS for '%s'", len(results), keywords)
+        logger.info("Raw /in/ links found: %d", len(raw_links))
+
+        results: list[dict[str, str]] = []
+        seen: set[str] = set()
+        for link in raw_links:
+            # Extract username from href
+            m = re.search(r'/in/([a-zA-Z0-9_-]+)', link.get("href", ""))
+            if not m:
+                continue
+            username = m.group(1)
+            if username.startswith("ACoA"):
+                continue
+            if username in seen:
+                continue
+            seen.add(username)
+
+            # Extract name from aria-label ("View X\u2019s profile")
+            name = ""
+            label = link.get("label", "")
+            if label:
+                # Strip "View " prefix and "'s profile" suffix (curly + straight quotes)
+                name = re.sub(r"^View\s+", "", label)
+                name = re.sub(r"[\u2018\u2019\u0027]s\s+profile$", "", name, flags=re.IGNORECASE)
+                name = name.strip()
+
+            # Fallback: first line of text content
+            if not name or len(name) < 2:
+                text = link.get("text", "").split("\n")[0].strip()
+                if 2 < len(text) < 60:
+                    name = text
+
+            # Skip garbage
+            if not name or len(name) < 2:
+                continue
+            if _is_garbage_name(name):
+                continue
+
+            results.append({
+                "full_name": name,
+                "headline": "",
+                "location": "",
+                "linkedin_url": f"https://www.linkedin.com/in/{username}/",
+                "profile_username": username,
+            })
+
+        logger.info("Python parser extracted %d results for '%s'", len(results), keywords)
         for i, r in enumerate(results[:3]):
-            logger.info("  [%d] %s — %s (%s)", i, r.get("full_name"), r.get("headline", "")[:50], r.get("profile_username"))
-
-        if not results:
-            # Fallback: richer extraction from profile links + surrounding context
-            logger.info("JS selector found 0, trying enhanced fallback...")
-            try:
-                visible = await self._page.inner_text("body")
-                logger.info("Visible text (500 chars): %s", visible[:500].replace("\n", " | "))
-
-                # Extract profile links with aria-label, clean text, and
-                # sibling/parent context for headline extraction
-                all_links = await self._page.evaluate("""() => {
-                    const SKIP_LINES = [
-                        'Status is', 'View ', 'Connect', 'Follow', 'Message',
-                        'Pending', 'Send InMail', 'Premium', 'Repost', 'Like',
-                        'Comment', 'Share', 'Report', 'Save'
-                    ];
-                    function isNoise(t) {
-                        if (SKIP_LINES.some(s => t.includes(s))) return true;
-                        if (/^Join LinkedIn/i.test(t)) return true;
-                        if (/^LinkedIn Member/i.test(t)) return true;
-                        if (/^Sign in/i.test(t)) return true;
-                        if (/^Provides services/i.test(t)) return true;
-                        if (/^ACoA/.test(t)) return true;
-                        if (t.length > 80) return true;
-                        return false;
-                    }
-                    function cleanLines(raw) {
-                        return raw.split('\\n')
-                            .map(l => l.trim())
-                            .filter(l => l.length > 1 && !isNoise(l));
-                    }
-
-                    const links = document.querySelectorAll('a[href*="/in/"]');
-                    const results = [];
-                    const seenHrefs = new Set();
-
-                    for (const a of links) {
-                        const href = a.getAttribute('href') || '';
-                        const m = href.match(/\\/in\\/([^/?]+)/);
-                        if (!m) continue;
-                        if (seenHrefs.has(m[1])) continue;
-                        seenHrefs.add(m[1]);
-
-                        // Strategy 1: aria-label (e.g. "View John Doe's profile")
-                        // Handle curly apostrophes (\u2018 \u2019) and straight quotes
-                        let name = '';
-                        const ariaLabel = a.getAttribute('aria-label') || '';
-                        if (ariaLabel) {
-                            const am = ariaLabel.match(/^View\\s+(.+?)[\\u2018\\u2019\\u0027\u2018\u2019']s\\s+profile$/i);
-                            if (am) {
-                                name = am[1].trim();
-                            } else {
-                                name = ariaLabel
-                                    .replace(/[\\u2018\\u2019\\u0027\u2018\u2019']s\\s+profile$/i, '')
-                                    .replace(/^View\\s+/i, '')
-                                    .trim();
-                            }
-                        }
-
-                        // Strategy 2: span[aria-hidden="true"] inside the link
-                        if (!name) {
-                            const hiddenSpan = a.querySelector('span[aria-hidden="true"]');
-                            if (hiddenSpan) {
-                                const t = hiddenSpan.textContent.trim();
-                                if (t && !isNoise(t)) name = t;
-                            }
-                        }
-
-                        // Strategy 3: textContent lines, skipping noise
-                        if (!name) {
-                            const lines = cleanLines(a.textContent || '');
-                            if (lines.length > 0) name = lines[0];
-                        }
-
-                        if (!name || name.length < 2) continue;
-
-                        // Extract headline from nearby context:
-                        // Walk up to the closest <li> or container, then grab
-                        // non-noise text spans that aren't the name itself
-                        let headline = '';
-                        const container = a.closest('li') || a.closest('[data-view-name]') || a.parentElement?.parentElement?.parentElement;
-                        if (container) {
-                            const spans = container.querySelectorAll('span[aria-hidden="true"], span.t-14');
-                            for (const s of spans) {
-                                const t = s.textContent.trim();
-                                if (t && t !== name && t.length > 3 && t.length < 200 && !isNoise(t)
-                                    && !/^\\d+(st|nd|rd|th)$/.test(t)) {
-                                    headline = t;
-                                    break;
-                                }
-                            }
-                        }
-
-                        // Skip ACoAA internal IDs — they cannot be deep-screened
-                        if (/^ACoA/.test(m[1])) continue;
-
-                        results.push({
-                            username: m[1],
-                            name: name,
-                            headline: headline
-                        });
-                    }
-                    return results;
-                }""")
-                logger.info("Found %d profile links via enhanced fallback", len(all_links))
-
-                for link in all_links:
-                    results.append({
-                        "full_name": link.get("name", ""),
-                        "headline": link.get("headline", ""),
-                        "location": "",
-                        "linkedin_url": f"https://www.linkedin.com/in/{link['username']}/",
-                        "profile_username": link["username"],
-                    })
-
-                logger.info("Enhanced fallback extracted %d results", len(results))
-            except Exception:
-                logger.error("Enhanced fallback extraction failed", exc_info=True)
-
-        # ULTIMATE FALLBACK: parse visible text + extract /in/ URLs from page source
-        # This handles the case where both JS extractors fail (LinkedIn changed DOM)
-        if not results:
-            logger.info("Both JS extractors failed — trying text+URL ultimate fallback...")
-            try:
-                # Get all /in/ URLs from page HTML (not DOM — raw source)
-                page_url_results = await self._page.evaluate("""() => {
-                    // Get ALL href attributes from the entire page
-                    const allAs = document.querySelectorAll('a');
-                    const profiles = new Map();
-                    for (const a of allAs) {
-                        const href = a.getAttribute('href') || '';
-                        const m = href.match(/\\/in\\/([a-zA-Z0-9_-]{3,100})\\/?/);
-                        if (!m) continue;
-                        const username = m[1];
-                        if (/^ACoA/.test(username)) continue;
-                        if (profiles.has(username)) continue;
-
-                        // Get name: try aria-label first
-                        let name = '';
-                        const ariaLabel = a.getAttribute('aria-label') || '';
-                        if (ariaLabel) {
-                            // "View X's profile" or "Voir le profil de X"
-                            name = ariaLabel
-                                .replace(/^View\\s+/i, '')
-                                .replace(/\\u2019s profile$/i, '')
-                                .replace(/'s profile$/i, '')
-                                .replace(/\\u2019s profil$/i, '')
-                                .trim();
-                        }
-                        if (!name || name.length < 2) {
-                            // Try textContent
-                            const tc = (a.textContent || '').trim().split('\\n')[0].trim();
-                            if (tc.length > 1 && tc.length < 60) name = tc;
-                        }
-                        if (!name || name.length < 2) continue;
-
-                        // Skip noise
-                        const noise = ['Join LinkedIn','LinkedIn Member','Sign in','Provides services','Status is'];
-                        if (noise.some(n => name.startsWith(n))) continue;
-
-                        profiles.set(username, {username, name});
-                    }
-                    return Array.from(profiles.values());
-                }""")
-
-                for p in page_url_results:
-                    results.append({
-                        "full_name": p["name"],
-                        "headline": "",
-                        "location": "",
-                        "linkedin_url": f"https://www.linkedin.com/in/{p['username']}/",
-                        "profile_username": p["username"],
-                    })
-
-                logger.info("Ultimate fallback: extracted %d profiles from page links", len(results))
-            except Exception:
-                logger.error("Ultimate fallback failed", exc_info=True)
+            logger.info("  [%d] %s (%s)", i, r["full_name"], r["profile_username"])
 
         # Retry logic: if we still got 0 results, reload and try once more
         if not results and not getattr(self, '_search_retried', False):
