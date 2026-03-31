@@ -147,19 +147,35 @@ async def run_research_loop() -> None:
             if not session_valid:
                 logger.info("SCRAPE SKIPPED (session expired) — jumping to analysis steps")
 
-            # Emergency mode: if too many consecutive empty runs, use guaranteed-results queries
-            EMERGENCY_QUERIES = [
-                {"keywords": "CTO", "location": "Singapore", "reasoning": "emergency-mode fallback"},
-                {"keywords": "VP Engineering", "location": "Singapore", "reasoning": "emergency-mode fallback"},
-                {"keywords": "Head of Digital", "location": "Singapore", "reasoning": "emergency-mode fallback"},
-                {"keywords": "IT Director", "location": "Singapore", "reasoning": "emergency-mode fallback"},
-                {"keywords": "Software engineering lead", "location": "Singapore", "reasoning": "emergency-mode fallback"},
-            ]
+            # Emergency mode + deep rescan of old queries at deeper pages
             if LOOP_STATE["consecutive_empty_runs"] >= 3:
                 logger.warning(
-                    "EMERGENCY MODE: %d consecutive empty runs — switching to broad guaranteed queries",
+                    "EMERGENCY MODE: %d consecutive empty runs — mixing new broad queries + deep rescan of old ones",
                     LOOP_STATE["consecutive_empty_runs"],
                 )
+                # Mix: 5 guaranteed broad + 5 best-performing old queries (rescan at deeper pages)
+                EMERGENCY_QUERIES = [
+                    {"keywords": "CTO", "location": "Singapore", "reasoning": "emergency broad"},
+                    {"keywords": "VP Engineering", "location": "Singapore", "reasoning": "emergency broad"},
+                    {"keywords": "technical architect", "location": "Singapore", "reasoning": "emergency new title"},
+                    {"keywords": "engineering manager", "location": "Kuala Lumpur", "reasoning": "emergency new location"},
+                    {"keywords": "Head of Product", "location": "Bangkok", "reasoning": "emergency new location"},
+                ]
+                # Add top performing old queries for deep-page rescan
+                try:
+                    async with db.execute("""
+                        SELECT DISTINCT keywords, location FROM search_queries
+                        WHERE id IN (
+                            SELECT source_search_id FROM prospects
+                            WHERE relevance_score > 30 AND source_search_id IS NOT NULL
+                        )
+                        ORDER BY RANDOM() LIMIT 5
+                    """) as cursor:
+                        old_good = [{"keywords": r[0], "location": r[1], "reasoning": "deep rescan of proven query", "_start_page": 10} for r in await cursor.fetchall()]
+                    EMERGENCY_QUERIES.extend(old_good)
+                    logger.info("EMERGENCY: added %d old queries for deep rescan", len(old_good))
+                except Exception:
+                    pass
                 queries = EMERGENCY_QUERIES
 
             if session_valid:
@@ -172,13 +188,14 @@ async def run_research_loop() -> None:
                     LOOP_STATE["current_step"] = f"Recherche {i+1}/{min(len(queries), 5)}: {kw[:40]}..."
 
                     try:
-                        # Page 1
-                        results = await _scraper.search_people(kw, loc)
-                        logger.info("SCRAPE [%d/%d] page 1 got %d results", i + 1, min(len(queries), 5), len(results))
+                        # Start page (normally 1, but deep rescan starts at 10+)
+                        start_pg = q.get("_start_page", 1)
+                        results = await _scraper.search_people(kw, loc, page=start_pg)
+                        logger.info("SCRAPE [%d/%d] page %d got %d results", i + 1, len(queries[:10]), start_pg, len(results))
 
-                        # Paginate up to 10 pages (~100 results per query)
+                        # Paginate deeper
                         if results:
-                            for pg in range(2, 51):  # Up to 50 pages (~500 results per query)
+                            for pg in range(start_pg + 1, start_pg + 50):
                                 await asyncio.sleep(random.uniform(2.0, 5.0))
                                 try:
                                     pg_results = await _scraper.search_people(kw, loc, page=pg)

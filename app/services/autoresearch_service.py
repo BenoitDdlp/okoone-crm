@@ -458,6 +458,10 @@ class AutoresearchService:
             location_dist = [f"{r[0]}: {r[1]}" for r in await cursor.fetchall()]
         loc_text = "\n".join(f"- {l}" for l in location_dist) if location_dist else "Pas encore de donnees."
 
+        # Count total prospects
+        async with db.execute("SELECT COUNT(*) FROM prospects") as cursor:
+            total = (await cursor.fetchone())[0]
+
         prompt = f"""## Programme de recherche (v{version})
 {program}
 
