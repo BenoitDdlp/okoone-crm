@@ -31,6 +31,7 @@ class Settings(BaseSettings):
 
     AUTO_ACCEPT_IMPROVEMENTS: bool = True
     LOOP_ALWAYS_ON: bool = True
+    N8N_MODE: bool = False
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 

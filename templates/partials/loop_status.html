@@ -109,6 +109,7 @@
 {% elif loop.active %}
 <div class="loop-indicator" style="margin-top: 0.75rem">
   <span class="loop-dot"></span>
+  {% if "n8n:" in (loop.current_step or "") %}<span style="background:var(--accent);color:var(--bg);padding:0.1rem 0.4rem;border-radius:3px;font-size:0.7rem;font-weight:600;margin-right:0.4rem;">n8n</span>{% endif %}
   <span>{{ loop.current_step or 'En attente du prochain cycle...' }}</span>
 </div>
 {% endif %} {% if loop.last_error and loop.status == 'error' %}

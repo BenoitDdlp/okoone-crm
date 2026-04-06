@@ -70,7 +70,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     else:
         first_run = None  # manual activation from UI
 
-    scheduler.add_job(
+    if not settings.N8N_MODE:
+        scheduler.add_job(
         run_research_loop,
         "interval",
         minutes=settings.SCRAPE_INTERVAL_MINUTES,
@@ -168,6 +169,7 @@ async def logout():
 
 
 from app.routers import dashboard, prospects, searches, campaigns, scraper, eval as eval_router, chat, strategy
+from app.routers import n8n as n8n_router
 
 app.include_router(dashboard.router)
 app.include_router(prospects.router)
@@ -177,6 +179,7 @@ app.include_router(scraper.router)
 app.include_router(eval_router.router)
 app.include_router(chat.router)
 app.include_router(strategy.router)
+app.include_router(n8n_router.router)
 
 
 @app.get("/health")

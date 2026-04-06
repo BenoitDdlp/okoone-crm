@@ -83,8 +83,11 @@ async def loop_status_compact(request: Request):
         dot = "background:var(--accent);animation:pulse 1s infinite"
         step = loop.get("current_step", "en cours...")
         text = step[:80]
+    n8n_badge = '<span style="background:#6366f1;color:white;padding:0.05rem 0.35rem;border-radius:3px;font-size:0.7rem;font-weight:600;margin:0 0.3rem;">n8n</span>' if text.startswith('n8n:') else ''
+    if text.startswith('n8n:'):
+        text = text[4:].strip()
     return HTMLResponse(
-        f'<span style="width:8px;height:8px;border-radius:50%;{dot};display:inline-block;flex-shrink:0;"></span> {text}'
+        f'<span style="width:8px;height:8px;border-radius:50%;{dot};display:inline-block;flex-shrink:0;"></span> {n8n_badge}{text}'
     )
 
 

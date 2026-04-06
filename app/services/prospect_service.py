@@ -6,6 +6,7 @@ from typing import Optional
 
 from app.repositories.prospect_repo import ProspectRepository
 from app.services.scoring_service import ScoringService
+from app.utils.garbage_patterns import is_garbage_name, is_garbage_headline, is_garbage_location
 
 
 class ProspectService:
@@ -75,6 +76,15 @@ class ProspectService:
                     data[json_field] = json.dumps(val)
                 elif isinstance(val, str):
                     data[json_field] = val
+
+        # ---- Garbage gate: reject LinkedIn UI artefacts BEFORE storing ----
+        raw_name = scraped_data.get("full_name", "") or ""
+        if is_garbage_name(raw_name):
+            raise ValueError(f"Garbage name rejected: {raw_name!r}")
+        if is_garbage_headline(data.get("headline", "") or ""):
+            raise ValueError(f"Garbage headline rejected: {data.get('headline')!r}")
+        if is_garbage_location(data.get("location", "") or ""):
+            raise ValueError(f"Garbage location rejected: {data.get('location')!r}")
 
         data["source_search_id"] = search_id
         now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")

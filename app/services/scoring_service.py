@@ -132,6 +132,22 @@ class ScoringService:
         breakdown["completeness"] = self._score_completeness(prospect)
         breakdown["activity"] = self._score_activity(prospect)
 
+        # ---- Hard gate: no company AND no location → score 0 ----
+        company = (prospect.get("current_company") or "").strip()
+        location = (prospect.get("location") or "").strip()
+        if not company and not location:
+            return 0.0, breakdown
+
+        # ---- Hard gate: junior/intern titles → cap at 15 ----
+        title_text = (prospect.get("current_title") or prospect.get("headline") or "").lower()
+        junior_patterns = ["junior", "jr.", "intern", "trainee", "entry level", "entry-level", "associate", "assistant"]
+        if any(pat in title_text for pat in junior_patterns) and breakdown["seniority"] <= 0.1:
+            weight_sum = sum(weights.get(k, 0) for k in breakdown)
+            if weight_sum == 0:
+                return 0.0, breakdown
+            total = sum(breakdown[k] * weights.get(k, 0) for k in breakdown) / weight_sum
+            return min(round(total * 100, 1), 15.0), breakdown
+
         weight_sum = sum(weights.get(k, 0) for k in breakdown)
         if weight_sum == 0:
             return 0.0, breakdown
@@ -282,7 +298,10 @@ class ScoringService:
         except (json.JSONDecodeError, TypeError):
             experience = []
 
-        score = 0.5  # neutral baseline
+        if not company:
+            return 0.0
+
+        score = 0.3  # non-empty company baseline, boosted by keyword matches
 
         # Enterprise / large company signals
         enterprise_keywords = [
@@ -374,7 +393,7 @@ class ScoringService:
         """Singapore=1.0, SEA=0.7, APAC=0.5, West=0.3, unknown=0.2."""
         location = (p.get("location") or "").lower().strip()
         if not location:
-            return 0.2  # unknown location gets a low baseline
+            return 0.0  # no location = no score
 
         for keywords, tier_score in self.LOCATION_TIERS:
             for kw in keywords:
@@ -417,7 +436,7 @@ class ScoringService:
         - Has skills → profile maintenance signal
         - Recent screened_at → recently active
         """
-        score = 0.3  # baseline
+        score = 0.0  # no free points — must be earned
 
         if p.get("about_text") and len(p.get("about_text", "")) > 100:
             score += 0.2
